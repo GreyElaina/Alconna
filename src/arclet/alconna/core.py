@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Generic, Literal, Sequence, TypeVar, cast, overload
 
@@ -349,7 +350,7 @@ class Alconna(Subcommand, Generic[TDC]):
             message (TDC): 命令消息
             ctx (dict[str, Any], optional): 上下文信息
         Returns:
-            Arparma[TDC] | T_Duplication: 若`duplication`参数为`None`则返回`Arparma`对象, 否则返回`duplication`类型的对象
+            Arparma[TDC] | T: 解析结果
         Raises:
             NullMessage: 传入的消息为空时抛出
         """
