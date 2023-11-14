@@ -256,7 +256,7 @@ def handle_option(argv: Argv, opt: Option, trigger: str | None = None) -> tuple[
             error = False
         if error:
             if argv.fuzzy_match and levenshtein(name, opt.name) >= config.fuzzy_threshold:
-                raise FuzzyMatchSuccess(lang.require("fuzzy", "matched").format(source=name, target=opt.name))
+                raise FuzzyMatchSuccess(lang.require("fuzzy", "matched").format(source=opt.name, target=name))
             raise InvalidParam(lang.require("option", "name_error").format(source=opt.name, target=name))
     return (
         (opt.dest, OptionResult(None, analyse_args(argv, opt.args)))
