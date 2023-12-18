@@ -375,6 +375,9 @@ def analyse_param(analyser: SubAnalyser, argv: Argv, seps: tuple[str, ...] | Non
         if analyser.args_result:
             argv.context = None
             return True
+    if analyser.extra_allow:
+        analyser.args_result.setdefault("$extra", []).append(_text)
+        argv.next(seps, move=True)
     return False
 
 
