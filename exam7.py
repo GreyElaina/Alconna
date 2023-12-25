@@ -7,10 +7,12 @@ from typing_extensions import Self
 from dataclasses import dataclass, field
 from pprint import pprint
 
+
 @dataclass
 class Scope:
     refer: Node
     substance: dict[str, Node] = field(default_factory=dict)
+
 
 NodeMap: dict[str, Scope] = {}
 

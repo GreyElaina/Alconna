@@ -5,13 +5,13 @@ import inspect
 import re
 import sys
 from enum import Enum
-from typing import Any, Callable, Generic, Iterable, List, Sequence, Type, TypeVar, Union
+from typing import Any, Callable, Generic, Iterable, List, Sequence, Type, TypeVar, Union, cast
 from typing_extensions import Self, TypeAlias
 
 from nepattern import BasePattern, MatchMode, RawStr, UnionPattern, parser, NONE, ANY, AntiPattern
 from tarina import Empty, get_signature, lang
 
-from .typing import KeyWordVar, MultiVar, KWBool, UnpackVar, AllParam
+from .typing import KeyWordVar, MultiVar, MultiKeyWordVar, KWBool, UnpackVar, AllParam
 from .exceptions import InvalidArgs
 
 
@@ -165,14 +165,14 @@ class ArgsMeta(type):
 
 
 class _argument(List[Arg[Any]]):
-    __slots__ = ("unpack", "var_positional", "var_keyword", "keyword_only", "normal")
+    __slots__ = ("unpack", "vars_positional", "vars_keyword", "keyword_only", "normal")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.normal: list[Arg[Any]] = []
-        self.var_positional: tuple[MultiVar, Arg[Any]] | None = None
-        self.var_keyword: tuple[MultiVar, Arg[Any]] | None = None
         self.keyword_only: dict[str, Arg[Any]] = {}
+        self.vars_positional: list[tuple[MultiVar, Arg[Any]]] = []
+        self.vars_keyword: list[tuple[MultiKeyWordVar, Arg[Any]]] = []
         self.unpack: tuple[Arg, Args] | None = None
 
 
@@ -235,7 +235,7 @@ class Args(metaclass=ArgsMeta):
             if param.kind == param.VAR_POSITIONAL:
                 anno = MultiVar(anno, "*")
             if param.kind == param.VAR_KEYWORD:
-                anno = MultiVar(KeyWordVar(anno), "*")
+                anno = MultiKeyWordVar(KeyWordVar(anno), "*")
             _args.add(name, value=anno, default=de)
         return _args, method
 
@@ -313,25 +313,23 @@ class Args(metaclass=ArgsMeta):
                 break
             if isinstance(arg.value, MultiVar):
                 if isinstance(arg.value.base, KeyWordVar):
-                    if self.argument.var_keyword:
-                        raise InvalidArgs(lang.require("args", "duplicate_kwargs"))
-                    if self.argument.var_positional and arg.value.base.sep in self.argument.var_positional[1].separators:  # noqa: E501
-                        raise InvalidArgs("varkey cannot use the same sep as varpos's Arg")
-                    self.argument.var_keyword = (arg.value, arg)
-                elif self.argument.var_positional:
-                    raise InvalidArgs(lang.require("args", "duplicate_varargs"))
+                    for slot in self.argument.vars_positional:
+                        _, a = slot
+                        if arg.value.base.sep in a.separators:
+                            raise InvalidArgs("varkey cannot use the same sep as varpos's Arg")
+                    self.argument.vars_keyword.append((cast(MultiKeyWordVar, arg.value), arg))
                 elif self.argument.keyword_only:
                     raise InvalidArgs(lang.require("args", "exclude_mutable_args"))
                 else:
-                    self.argument.var_positional = (arg.value, arg)
+                    self.argument.vars_positional.append((arg.value, arg))
             elif isinstance(arg.value, KeyWordVar):
-                if self.argument.var_keyword:
+                if self.argument.vars_keyword:
                     raise InvalidArgs(lang.require("args", "exclude_mutable_args"))
                 self.argument.keyword_only[arg.name] = arg
             else:
                 self.argument.normal.append(arg)
                 if arg.optional:
-                    if self.argument.var_keyword or self.argument.var_positional:
+                    if self.argument.vars_keyword or self.argument.vars_positional:
                         raise InvalidArgs(lang.require("args", "exclude_mutable_args"))
                     self.optional_count += 1
         self.argument.clear()
