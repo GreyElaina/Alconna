@@ -530,10 +530,10 @@ def test_help():
         assert cap["output"] == "[foo] <bar: str> \nFoo bar"
     with output_manager.capture("core17") as cap:
         alc17.parse("core17 --help baz")
-        assert cap["output"] == "baz <qux: str> \nBaz qux"
+        assert cap["output"] == "[baz] <qux: str> \nBaz qux"
     with output_manager.capture("core17") as cap:
         alc17.parse("core17 baz --help")
-        assert cap["output"] == "baz <qux: str> \nBaz qux"
+        assert cap["output"] == "[baz] <qux: str> \nBaz qux"
     with output_manager.capture("core17") as cap:
         alc17.parse("core17 add --help")
         assert cap["output"] == "add <bar: str> \nAdd bar"

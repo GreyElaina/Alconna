@@ -111,12 +111,12 @@ class _AllParamPattern(BasePattern[Any, Any]):
 AllParam = _AllParamPattern()
 
 
-class KeyWordVar(BasePattern[T]):
+class KeyWordVar(BasePattern[T, Any]):
     """对具名参数的包装"""
 
     base: BasePattern
 
-    def __init__(self, value: BasePattern[T] | type[T], sep: str = "="):
+    def __init__(self, value: BasePattern[T, Any] | type[T], sep: str = "="):
         """构建一个具名参数
 
         Args:
@@ -135,21 +135,21 @@ class KeyWordVar(BasePattern[T]):
 class _Kw:
     __slots__ = ()
 
-    def __getitem__(self, item: BasePattern[T] | type[T]):
+    def __getitem__(self, item: BasePattern[T, Any] | type[T]):
         return KeyWordVar(item)
 
     __matmul__ = __getitem__
     __rmatmul__ = __getitem__
 
 
-class MultiVar(BasePattern[T]):
+class MultiVar(BasePattern[T, Any]):
     """对可变参数的包装"""
 
-    base: BasePattern[T]
+    base: BasePattern[T, Any]
     flag: Literal["+", "*"]
     length: int
 
-    def __init__(self, value: BasePattern[T] | type[T], flag: int | Literal["+", "*"] = "+"):
+    def __init__(self, value: BasePattern[T, Any] | type[T], flag: int | Literal["+", "*"] = "+"):
         """构建一个可变参数
 
         Args:
