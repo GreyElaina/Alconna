@@ -585,11 +585,11 @@ def test_completion():
         + Option("fool")
         + Option(
             "foo",
-            Args["bar", "a|b|c", Field(completion=lambda: "test completion; choose a, b or c")],
+            Args["bar", "a|b|c", Field(completion=lambda: "choose a, b or c")],
         )
         + Option(
             "off",
-            Args["baz", "aaa|aab|abc", Field(completion=lambda: ["aaa", "aab", "abc"])],
+            Args["baz", "aaa|aab|abc", Field(completion=lambda: ["use aaa", "use aab", "use abc"])],
         )
         + Args["test", int, Field(1, completion=lambda: "try -1")]
     )
@@ -599,7 +599,7 @@ def test_completion():
     alc20.parse("core20 fo --comp")
     alc20.parse("core20 foo --comp")
     alc20.parse("core20 fool --comp")
-    alc20.parse("core20 off c --comp")
+    alc20.parse("core20 off b --comp")
 
     alc20_1 = Alconna("core20_1", Args["foo", int], Option("bar"))
     res = alc20_1.parse("core20_1 -cp")
