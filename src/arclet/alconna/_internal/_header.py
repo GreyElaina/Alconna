@@ -70,7 +70,7 @@ class Pair:
                 if command == self.pattern:
                     return command, None
                 if comp and command.startswith(self.pattern):
-                    pbfn(command[len(self.pattern) :], replace=True)
+                    pbfn(command[len(self.pattern):], replace=True)
                     return self.pattern, None
                 return None, None
 
@@ -81,7 +81,7 @@ class Pair:
                 if mat := self.pattern.fullmatch(command):
                     return command, mat
                 if comp and (mat := self.pattern.match(command)):
-                    pbfn(command[len(mat[0]) :], replace=True)
+                    pbfn(command[len(mat[0]):], replace=True)
                     return mat[0], mat
                 return None, None
 
@@ -179,7 +179,7 @@ class Double:
         if (val := self.patterns.validate(pf)).success and (mat := self.command.fullmatch(cmd)):
             return (pf, cmd), (val._value, cmd), True, mat.groupdict()
         if comp and (mat := self.comp_pattern.match(cmd)):
-            pbfn(cmd[len(mat[0]) :], replace=True)
+            pbfn(cmd[len(mat[0]):], replace=True)
             return (pf, cmd), (pf, mat[0]), True, mat.groupdict()
 
     def match(self, pf: Any, cmd: Any, p_str: bool, c_str: bool, pbfn: Callable[..., ...], comp: bool):
@@ -195,14 +195,14 @@ class Double:
                 return pf, pf, True, mat.groupdict()
             if comp and (mat := self.comp_pattern.match(pf)):
                 pbfn(cmd)
-                pbfn(pf[len(mat[0]) :], replace=True)
+                pbfn(pf[len(mat[0]):], replace=True)
                 return mat[0], mat[0], True, mat.groupdict()
             if not c_str:
                 return
             if mat := self.prefix.fullmatch((name := pf + cmd)):
                 return name, name, True, mat.groupdict()
             if comp and (mat := self.comp_pattern.match(name)):
-                pbfn(name[len(mat[0]) :], replace=True)
+                pbfn(name[len(mat[0]):], replace=True)
                 return mat[0], mat[0], True, mat.groupdict()
             return
         if (val := self.patterns.validate(pf)).success:

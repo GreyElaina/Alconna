@@ -28,7 +28,6 @@ def resolve(parts: list[str], options: list[Option | Subcommand]):
             return sub if (sub := resolve(parts, opt.options)) else opt
     return resolve(parts, options)
 
-
 @dataclass(eq=True)
 class Trace:
     """存放命令节点数据的结构
