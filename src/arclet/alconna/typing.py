@@ -18,7 +18,7 @@ class ShortcutRegWrapper(Protocol):
 class ShortcutArgs(TypedDict):
     """快捷指令参数"""
 
-    command: NotRequired[DataCollection[Any]]
+    command: NotRequired[str]
     """快捷指令的命令"""
     args: NotRequired[list[Any]]
     """快捷指令的附带参数"""
@@ -172,8 +172,7 @@ class MultiVar(BasePattern[T, Any]):
             alias = str(self.base)
             self.flag = "+"
             self.length = 1
-        origin = Dict[str, self.base.origin] if isinstance(self.base, KeyWordVar) else Tuple[self.base.origin, ...]
-        super().__init__(mode=MatchMode.KEEP, origin=origin, alias=alias)
+        super().__init__(mode=MatchMode.KEEP, origin=self.base.origin, alias=alias)
 
     def __repr__(self):
         return self.alias
