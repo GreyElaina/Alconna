@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import is_dataclass
-from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Generic, Literal, Sequence, TypeVar, cast, overload
 from typing_extensions import Self
+from weakref import WeakSet
 
 from tarina import init_spec, lang
 
@@ -18,7 +17,7 @@ from .config import Namespace, config
 from .exceptions import NullMessage
 from .formatter import TextFormatter
 from .manager import ShortcutArgs, command_manager
-from .typing import TDC, CommandMeta, DataCollection, ShortcutRegWrapper, TPrefixes, InnerShortcutArgs
+from .typing import TDC, CommandMeta, DataCollection, ShortcutRegWrapper, TPrefixes
 
 T = TypeVar("T")
 TCallable = TypeVar("TCallable", bound=Callable[..., Any])
@@ -84,10 +83,9 @@ class Alconna(Subcommand, Generic[TDC]):
     behaviors: list[ArparmaBehavior]
     """命令行为器"""
 
-    @property
-    def compile(self) -> Callable[[TCompile | None], Analyser[TDC]]:
+    def compile(self, compiler: TCompile | None = None, param_ids: set[str] | None = None) -> Analyser[TDC]:
         """编译 `Alconna` 为对应的解析器"""
-        return partial(Analyser, self)
+        return Analyser(self, compiler).compile(param_ids)
 
     def __init__(
         self,
@@ -129,6 +127,7 @@ class Alconna(Subcommand, Generic[TDC]):
         self.meta.fuzzy_match = self.meta.fuzzy_match or ns_config.fuzzy_match
         self.meta.raise_exception = self.meta.raise_exception or ns_config.raise_exception
         self.meta.compact = self.meta.compact or ns_config.compact
+        self.meta.context_style = self.meta.context_style or ns_config.context_style
         options = [i for i in args if isinstance(i, (Option, Subcommand))]
         add_builtin_options(options, ns_config)
         name = f"{self.command or self.prefixes[0]}"  # type: ignore
@@ -141,7 +140,7 @@ class Alconna(Subcommand, Generic[TDC]):
             self.behaviors.extend(requirement_handler(behavior))
         command_manager.register(self)
         self._executors: dict[Callable[..., Any], Any] = {}
-        self.union = set()
+        self.union: "WeakSet[Alconna]" = WeakSet()
 
     @property
     def namespace_config(self) -> Namespace:
@@ -154,19 +153,17 @@ class Alconna(Subcommand, Generic[TDC]):
             namespace (Namespace | str): 命名空间
             header (bool, optional): 是否保留命令头, 默认为 `True`
         """
-        command_manager.delete(self)
-        if isinstance(namespace, str):
-            namespace = config.namespaces.setdefault(namespace, Namespace(namespace))
-        self.namespace = namespace.name
-        self.path = f"{self.namespace}::{self.name}"
-        if header:
-            self.prefixes = namespace.prefixes.copy()
-        self.options = self.options[:-3]
-        add_builtin_options(self.options, namespace)
-        self.meta.fuzzy_match = namespace.fuzzy_match or self.meta.fuzzy_match
-        self.meta.raise_exception = namespace.raise_exception or self.meta.raise_exception
-        self._hash = self._calc_hash()
-        command_manager.register(self)
+        with command_manager.update(self):
+            if isinstance(namespace, str):
+                namespace = config.namespaces.setdefault(namespace, Namespace(namespace))
+            self.namespace = namespace.name
+            self.path = f"{self.namespace}::{self.name}"
+            if header:
+                self.prefixes = namespace.prefixes.copy()
+            self.options = self.options[:-3]
+            add_builtin_options(self.options, namespace)
+            self.meta.fuzzy_match = namespace.fuzzy_match or self.meta.fuzzy_match
+            self.meta.raise_exception = namespace.raise_exception or self.meta.raise_exception
         return self
 
     def get_help(self) -> str:
@@ -178,10 +175,7 @@ class Alconna(Subcommand, Generic[TDC]):
         result = []
         shortcuts = command_manager.get_shortcut(self)
         for key, short in shortcuts.items():
-            if isinstance(short, InnerShortcutArgs):
-                result.append(key + (" ...args" if short.fuzzy else ""))
-            else:
-                result.append(key)
+            result.append(key + (" ...args" if short.fuzzy else ""))
         return result
 
     @overload
@@ -202,8 +196,8 @@ class Alconna(Subcommand, Generic[TDC]):
 
     @overload
     def shortcut(
-        self, 
-        key: str, 
+        self,
+        key: str,
         *,
         command: str | None = None,
         arguments: list[Any] | None = None,
@@ -246,24 +240,6 @@ class Alconna(Subcommand, Generic[TDC]):
         ...
 
     def shortcut(self, key: str, args: ShortcutArgs | None = None, delete: bool = False, **kwargs):
-        """操作快捷命令
-
-        Args:
-            key (str): 快捷命令名
-            args (ShortcutArgs | None, optional): 快捷命令参数, 不传入时则尝试使用最近一次使用的命令
-            delete (bool, optional): 是否删除快捷命令, 默认为 `False`
-            command (str, optional): 快捷命令指向的命令
-            arguments (list[Any] | None, optional): 快捷命令参数, 默认为 `None`
-            fuzzy (bool, optional): 是否允许命令后随参数, 默认为 `True`
-            prefix (bool, optional): 是否调用时保留指令前缀, 默认为 `False`
-            wrapper (ShortcutRegWrapper, optional): 快捷指令的正则匹配结果的额外处理函数, 默认为 `None`
-
-        Returns:
-            str: 操作结果
-
-        Raises:
-            ValueError: 快捷命令操作失败时抛出
-        """
         try:
             if delete:
                 return command_manager.delete_shortcut(self, key)
@@ -273,17 +249,8 @@ class Alconna(Subcommand, Generic[TDC]):
                 args = cast(ShortcutArgs, kwargs)
             if args is not None:
                 return command_manager.add_shortcut(self, key, args)
-            elif cmd := command_manager.recent_message:
-                alc = command_manager.last_using
-                if alc and alc == self.path:
-                    return command_manager.add_shortcut(self, key, {"command": cmd})  # type: ignore
-                raise ValueError(
-                    lang.require("shortcut", "recent_command_error").format(
-                        target=self.path, source=getattr(alc, "path", "Unknown")
-                    )
-                )
             else:
-                raise ValueError(lang.require("shortcut", "no_recent_command"))
+                raise ValueError(f"{args} give a empty args")
         except Exception as e:
             if self.meta.raise_exception:
                 raise e
@@ -301,66 +268,48 @@ class Alconna(Subcommand, Generic[TDC]):
         Returns:
             Self: 命令本身
         """
-        command_manager.delete(self)
-        self.options.insert(-3, opt)
-        self._hash = self._calc_hash()
-        command_manager.register(self)
+        with command_manager.update(self):
+            self.options.insert(-3, opt)
         return self
 
-    @init_spec(Option, True)
+    @init_spec(Option, is_method=True)
     def option(self, opt: Option) -> Self:
         """添加选项"""
         return self.add(opt)
 
-    @init_spec(Subcommand, True)
+    @init_spec(Subcommand, is_method=True)
     def subcommand(self, sub: Subcommand) -> Self:
         """添加子命令"""
         return self.add(sub)
 
-    def _parse(self, message: TDC) -> Arparma[TDC]:
-        if self.union:
-            for ana, argv in command_manager.requires(*self.union):
-                if (res := ana.process(argv.build(message))).matched:
-                    return res
+    def _parse(self, message: TDC, ctx: dict[str, Any] | None = None) -> Arparma[TDC]:
         analyser = command_manager.require(self)
         argv = command_manager.resolve(self)
-        argv.build(message)
+        argv.enter(ctx).build(message)
         return analyser.process(argv)
 
-    @overload
-    def parse(self, message: TDC) -> Arparma[TDC]:
-        ...
-
-    @overload
-    def parse(self, message, *, _config: type[T]) -> T:
-        ...
-
-    def parse(self, message: TDC, *, _config: type[T] | None = None) -> Arparma[TDC] | T:
+    def parse(self, message: TDC, ctx: dict[str, Any] | None = None) -> Arparma[TDC]:
         """命令分析功能, 传入字符串或消息链, 返回一个特定的数据集合类
 
         Args:
             message (TDC): 命令消息
-            _config (type[T], optional): 可选的解析结果配置
+            ctx (dict[str, Any], optional): 上下文信息
         Returns:
             Arparma[TDC] | T: 解析结果
         Raises:
             NullMessage: 传入的消息为空时抛出
         """
         try:
-            arp = self._parse(message)
+            arp = self._parse(message, ctx)
         except NullMessage as e:
             if self.meta.raise_exception:
                 raise e
-            return Arparma(self.path, message, False, error_info=e)
+            return Arparma(self.path, message, False, error_info=e, ctx=ctx)
         if arp.matched:
             arp = arp.execute(self.behaviors)
             if self._executors:
                 for ext in self._executors:
                     self._executors[ext] = arp.call(ext)
-        if _config:
-            if not is_dataclass(_config):
-                raise TypeError("The type of _config must be a dataclass")
-            return arp.call(_config)
         return arp
 
     def bind(self):
@@ -382,24 +331,30 @@ class Alconna(Subcommand, Generic[TDC]):
     __rtruediv__ = __truediv__
 
     def __add__(self, other) -> Self:
-        command_manager.delete(self)
-        if isinstance(other, Alconna):
-            self.options.extend(other.options)
-        elif isinstance(other, CommandMeta):
-            self.meta = other
-        elif isinstance(other, Option):
-            self.options.append(other)
-        elif isinstance(other, Args):
-            self.args += other
-            self.nargs = len(self.args)
-        elif isinstance(other, str):
-            self.options.append(Option(other))
-        self._hash = self._calc_hash()
-        command_manager.register(self)
+        with command_manager.update(self):
+            if isinstance(other, Alconna):
+                self.options.extend(other.options)
+            elif isinstance(other, CommandMeta):
+                self.meta = other
+            elif isinstance(other, Option):
+                self.options.append(other)
+            elif isinstance(other, Args):
+                self.args += other
+                self.nargs = len(self.args)
+            elif isinstance(other, str):
+                self.options.append(Option(other))
         return self
 
     def __or__(self, other: Alconna) -> Self:
-        self.union.add(other.path)
+        self.union.add(other)
+
+        def _parse(message: TDC, ctx: dict[str, Any] | None = None) -> Arparma[TDC]:
+            for ana, argv in command_manager.unpack(self.union):
+                if (res := ana.process(argv.enter(ctx).build(message))).matched:
+                    return res
+            return command_manager.require(self).process(command_manager.resolve(self).enter(ctx).build(message))
+
+        self._parse = _parse
         return self
 
     def _calc_hash(self):
@@ -413,10 +368,6 @@ class Alconna(Subcommand, Generic[TDC]):
         if head != self.command:
             return self.parse(argv)  # type: ignore
         return self.parse([head, *argv])  # type: ignore
-
-    @property
-    def headers(self):
-        return self.prefixes
 
     @property
     def header_display(self):

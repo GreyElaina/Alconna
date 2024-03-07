@@ -93,7 +93,7 @@ class TextFormatter:
                 ))
             if isinstance(end, Subcommand):
                 return self.format(Trace(
-                    {"name": end.name, "prefix": [], "description": end.help_text}, end.args,
+                    {"name": "", "prefix": list(end.aliases), "description": end.help_text}, end.args,
                     end.separators, end.options  # type: ignore
                 ))
             return self.format(trace)
@@ -170,7 +170,12 @@ class TextFormatter:
         help_string = f"{desc}" if (desc := root.get("description")) else ""
         usage = f"{lang.require('format', 'usage')}:\n{usage}" if (usage := root.get("usage")) else ""
         example = f"{lang.require('format', 'example')}:\n{example}" if (example := root.get("example")) else ""
-        prefixs = f"[{''.join(map(str, prefixs))}]" if (prefixs := root.get("prefix", [])) != [] else ""
+        if not (_prefixs := root.get("prefix", [])):
+            prefixs = ""
+        elif len(_prefixs) == 1:
+            prefixs = _prefixs[0]
+        else:
+            prefixs = f"[{''.join(map(str, _prefixs))}]"
         cmd = f"{prefixs}{root.get('name', '')}"
         command_string = cmd or (root["name"] + separators[0])
         return command_string, help_string, usage, example
@@ -185,6 +190,7 @@ class TextFormatter:
 
     def sub(self, node: Subcommand) -> str:
         """对单个子命令的描述"""
+        alias_text = "|".join(node.aliases)
         opt_string = "".join(
             [self.opt(opt).replace("\n", "\n  ").replace("# ", "* ") for opt in node.options if isinstance(opt, Option)]
         )
@@ -198,7 +204,7 @@ class TextFormatter:
         sub_help = f"  {lang.require('format', 'subcommands.subs')}:\n  " if sub_string else ""
         return (
             f"* {node.help_text}\n"
-            f"  {node.name}{tuple(node.separators)[0]}{self.parameters(node.args)}\n"
+            f"  {alias_text}{node.separators[0]}{self.parameters(node.args)}\n"
             f"{sub_help}{sub_string}"
             f"{opt_help}{opt_string}"
         ).rstrip(" ")

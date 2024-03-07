@@ -1,11 +1,9 @@
-from arclet.alconna import Alconna, Option, count, Subcommand, Args, MultiVar, store_true
-from nepattern import URL, create_local_patterns
-from nepattern.main import StrPath
 from pathlib import Path
 from typing import Tuple
 
-create_local_patterns("example/pip", {Path: StrPath})
+from nepattern import URL
 
+from arclet.alconna import Alconna, Args, MultiVar, Option, Subcommand, count, store_true
 
 pip = Alconna(
     "/pip",

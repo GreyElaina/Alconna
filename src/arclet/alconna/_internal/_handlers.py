@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Iterable
 
-from nepattern import ANY, AnyString, BasePattern, STRING
+from nepattern import ANY, STRING, AnyString, BasePattern
 from nepattern.util import TPattern
-from tarina import Empty, lang, split_once
+from tarina import Empty, lang, safe_eval, split_once
 
 from ..action import Action
 from ..args import Arg, Args
@@ -15,7 +15,7 @@ from ..config import config
 from ..exceptions import ArgumentMissing, FuzzyMatchSuccess, InvalidParam, PauseTriggered, SpecialOptionTriggered
 from ..model import HeadResult, OptionResult
 from ..output import output_manager
-from ..typing import KWBool, ShortcutRegWrapper, MultiKeyWordVar, MultiVar
+from ..typing import KWBool, MultiKeyWordVar, MultiVar, ShortcutRegWrapper
 from ._header import Double, Header
 from ._util import escape, levenshtein, unescape
 
@@ -24,17 +24,42 @@ if TYPE_CHECKING:
     from ._argv import Argv
 
 pat = re.compile("(?:-*no)?-*(?P<name>.+)")
+_bracket = re.compile(r"{(.+)}")
+_parentheses = re.compile(r"\$?\((.+)\)")
 
 
-def _validate(argv: Argv, target: Arg[Any], value: BasePattern[Any], result: dict[str, Any], arg: Any, _str: bool):
+def _context(argv: Argv, target: Arg[Any], _arg: str):
+    _pat = _bracket if argv.context_style == "bracket" else _parentheses
+    if not (mat := _pat.fullmatch(_arg)):
+        return _arg
+    ctx = argv.context
+    name = mat.group(1)
+    if name == "_":
+        return ctx
+    if name in ctx:
+        return ctx[name]
+    try:
+        return safe_eval(name, ctx)
+    except NameError:
+        raise ArgumentMissing(target.field.get_missing_tips(lang.require("args", "missing").format(key=target.name)))
+    except Exception as e:
+        raise InvalidParam(
+            target.field.get_unmatch_tips(_arg, lang.require("nepattern", "context_error").format(target=target.name, expected=name))
+        )
+
+
+def _validate(argv: Argv, target: Arg[Any], value: BasePattern[Any, Any], result: dict[str, Any], arg: Any, _str: bool):
+    _arg = arg
+    if _str and argv.context_style:
+        _arg = _context(argv, target, _arg)
     if (value is STRING and _str) or value is ANY:
-        result[target.name] = arg
+        result[target.name] = _arg
         return
     if value is AnyString:
-        result[target.name] = str(arg)
+        result[target.name] = str(_arg)
         return
     default_val = target.field.default
-    res = value.validate(arg, default_val)
+    res = value.validate(_arg, default_val)
     if res.flag != "valid":
         argv.rollback(arg)
     if res.flag == "error":
@@ -46,7 +71,7 @@ def _validate(argv: Argv, target: Arg[Any], value: BasePattern[Any], result: dic
 
 def step_varpos(argv: Argv, args: Args, slot: tuple[MultiVar, Arg], result: dict[str, Any]):
     value, arg = slot
-    argv.context = arg
+    argv.current_node = arg
     key = arg.name
     default_val = arg.field.default
     _result = []
@@ -87,7 +112,7 @@ def step_varpos(argv: Argv, args: Args, slot: tuple[MultiVar, Arg], result: dict
 
 def step_varkey(argv: Argv, slot: tuple[MultiKeyWordVar, Arg], result: dict[str, Any]):
     value, arg = slot
-    argv.context = arg
+    argv.current_node = arg
     name = arg.name
     default_val = arg.field.default
     _result = {}
@@ -190,7 +215,7 @@ def analyse_args(argv: Argv, args: Args) -> dict[str, Any]:
     """
     result = {}
     for arg in args.argument.normal:
-        argv.context = arg
+        argv.current_node = arg
         may_arg, _str = argv.next(arg.separators)
         if _str and may_arg in argv.special:
             if argv.special[may_arg] not in argv.namespace.disable_builtin_options:
@@ -230,7 +255,7 @@ def analyse_args(argv: Argv, args: Args) -> dict[str, Any]:
         step_keyword(argv, args, result)
     for slot in args.argument.vars_keyword:
         step_varkey(argv, slot, result)
-    argv.context = None
+    argv.current_node = None
     return result
 
 
@@ -243,7 +268,7 @@ def handle_option(argv: Argv, opt: Option, trigger: str | None = None) -> tuple[
         opt (Option): 目标 `Option`
         trigger (str | None, optional): 触发的选项名.
     """
-    argv.context = opt
+    argv.current_node = opt
     _cnt = 0
     error = True
     if not trigger:
@@ -263,9 +288,12 @@ def handle_option(argv: Argv, opt: Option, trigger: str | None = None) -> tuple[
         elif name in opt.aliases:
             error = False
         if error:
-            if argv.fuzzy_match and levenshtein(name, opt.name) >= argv.fuzzy_threshold:
-                raise FuzzyMatchSuccess(lang.require("fuzzy", "matched").format(source=opt.name, target=name))
-            raise InvalidParam(lang.require("option", "name_error").format(source=opt.name, target=name))
+            if not argv.fuzzy_match:
+                raise InvalidParam(lang.require("option", "name_error").format(source=opt.dest, target=name))
+            for al in opt.aliases:
+                if levenshtein(name, al) >= argv.fuzzy_threshold:
+                    raise FuzzyMatchSuccess(lang.require("fuzzy", "matched").format(source=al, target=name))
+            raise InvalidParam(lang.require("option", "name_error").format(source=opt.dest, target=name))
     return (
         (opt.dest, OptionResult(None, analyse_args(argv, opt.args)))
         if opt.nargs
@@ -334,7 +362,7 @@ def analyse_compact_params(analyser: SubAnalyser, argv: Argv):
             _data.clear()
             return True
         except InvalidParam as e:
-            if argv.context.__class__ is Arg:
+            if argv.current_node.__class__ is Arg:
                 raise e
             argv.data_reset(_data, _index)
 
@@ -372,16 +400,16 @@ def analyse_param(analyser: SubAnalyser, argv: Argv, seps: tuple[str, ...] | Non
                     _param.process(argv, _text)
                 finally:
                     analyser.subcommands_result[_param.command.dest] = _param.result()
-            argv.context = None
+            argv.current_node = None
             return True
     argv.rollback(_text)
     if analyser.compact_params and analyse_compact_params(analyser, argv):
-        argv.context = None
+        argv.current_node = None
         return True
     if analyser.command.nargs and not analyser.args_result:
         analyser.args_result = analyse_args(argv, analyser.self_args)
         if analyser.args_result:
-            argv.context = None
+            argv.current_node = None
             return True
     if analyser.extra_allow:
         analyser.args_result.setdefault("$extra", []).append(_text)
@@ -420,6 +448,17 @@ def analyse_header(header: Header, argv: Argv) -> HeadResult:
             return HeadResult(val._value, val._value, True, fixes=mapping)
 
     may_cmd, _m_str = argv.next()
+    if _m_str:
+        cmd = f"{head_text}{argv.separators[0]}{may_cmd}"
+        if content.__class__ is set and cmd in content:
+            return HeadResult(cmd, cmd, True, fixes=mapping)
+        elif content.__class__ is TPattern and (mat := content.fullmatch(cmd)):
+            return HeadResult(cmd, cmd, True, mat.groupdict(), mapping)
+        if header.compact and content.__class__ in (set, TPattern) and (
+            mat := header.compact_pattern.match(cmd)
+        ):
+            argv.rollback(cmd[len(mat[0]):], replace=True)
+            return HeadResult(mat[0], mat[0], True, mat.groupdict(), mapping)
     if content.__class__ is list and _m_str:
         for pair in content:
             if res := pair.match(head_text, may_cmd, argv.rollback, header.compact):
@@ -435,7 +474,7 @@ def analyse_header(header: Header, argv: Argv) -> HeadResult:
         raise InvalidParam(lang.require("header", "error").format(target=head_text), head_text)
     if _m_str and may_cmd:
         if argv.fuzzy_match:
-            _handle_fuzzy(header, f"{head_text} {may_cmd}", argv.fuzzy_threshold)
+            _handle_fuzzy(header, f"{head_text}{argv.separators[0]}{may_cmd}", argv.fuzzy_threshold)
         raise InvalidParam(lang.require("header", "error").format(target=may_cmd), may_cmd)
     argv.rollback(may_cmd)
     raise InvalidParam(lang.require("header", "error").format(target=head_text), None)
@@ -487,8 +526,6 @@ def handle_shortcut(analyser: Analyser, argv: Argv):
                 raise ArgumentMissing(lang.require("shortcut", "name_require"))
             if opt_v.get("action") == "delete":
                 msg = analyser.command.shortcut(opt_v["name"], delete=True)
-            elif opt_v["command"] == "_":
-                msg = analyser.command.shortcut(opt_v["name"], None)
             elif opt_v["command"] == "$":
                 msg = analyser.command.shortcut(opt_v["name"], fuzzy=True)
             else:
@@ -530,8 +567,6 @@ def _handle_multi_slot(argv: Argv, unit: str, data: list, index: int, current: i
 
 def _handle_shortcut_data(argv: Argv, data: list):
     data_len = len(data)
-    if not data_len:
-        return []
     record = set()
     offset = 0
     for i, unit in enumerate(argv.raw_data.copy()):
@@ -577,18 +612,14 @@ def _handle_shortcut_reg(argv: Argv, groups: tuple[str, ...], gdict: dict[str, s
             if index >= len(groups):
                 continue
             slot = groups[index]
-            if slot is None:
-                continue
-            data.append(wrapper(index, slot) or slot)
+            data.append(wrapper(index, slot))
             continue
         if mat := KEY_REG_SLOT.fullmatch(unit):
             key = mat[1]
             if key not in gdict:
                 continue
             slot = gdict[key]
-            if slot is None:
-                continue
-            data.append(wrapper(key, slot) or slot)
+            data.append(wrapper(key, slot))
             continue
         if mat := INDEX_REG_SLOT.findall(unit):
             for index in map(int, mat):
@@ -596,20 +627,14 @@ def _handle_shortcut_reg(argv: Argv, groups: tuple[str, ...], gdict: dict[str, s
                     unit = unit.replace(f"{{{index}}}", "")
                     continue
                 slot = groups[index]
-                if slot is None:
-                    unit = unit.replace(f"{{{index}}}", "")
-                    continue
-                unit = unit.replace(f"{{{index}}}", str(wrapper(index, slot) or slot))
+                unit = unit.replace(f"{{{index}}}", str(wrapper(index, slot) or ""))
         if mat := KEY_REG_SLOT.findall(unit):
             for key in mat:
                 if key not in gdict:
                     unit = unit.replace(f"{{{key}}}", "")
                     continue
                 slot = gdict[key]
-                if slot is None:
-                    unit = unit.replace(f"{{{key}}}", "")
-                    continue
-                unit = unit.replace(f"{{{key}}}", str(wrapper(key, slot) or slot))
+                unit = unit.replace(f"{{{key}}}", str(wrapper(key, slot) or ""))
         if unit:
             data.append(unescape(unit))
     return data
@@ -647,7 +672,7 @@ def _prompt_none(analyser: Analyser, argv: Argv, got: list[str]):
 
 def prompt(analyser: Analyser, argv: Argv, trigger: str | None = None):
     """获取补全列表"""
-    _trigger = trigger or argv.context
+    _trigger = trigger or argv.current_node
     got = [*analyser.options_result.keys(), *analyser.subcommands_result.keys()]
     if isinstance(_trigger, Arg):
         return _prompt_unit(analyser, argv, _trigger)

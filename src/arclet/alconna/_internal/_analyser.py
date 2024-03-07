@@ -1,19 +1,28 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from re import Match
 from typing import TYPE_CHECKING, Any, Callable, Generic, Set
-
-from tarina import lang, Empty
 from typing_extensions import Self, TypeAlias
+
+from tarina import Empty, lang
 
 from ..action import Action
 from ..args import Args
 from ..arparma import Arparma
 from ..base import Completion, Help, Option, Shortcut, Subcommand
 from ..completion import comp_ctx
-from ..exceptions import ArgumentMissing, FuzzyMatchSuccess, InvalidParam, ParamsUnmatched, PauseTriggered, SpecialOptionTriggered
-from ..manager import ShortcutArgs, command_manager
+from ..constraint import SHORTCUT_ARGS, SHORTCUT_REGEX_MATCH, SHORTCUT_REST, SHORTCUT_TRIGGER
+from ..exceptions import (
+    ArgumentMissing,
+    FuzzyMatchSuccess,
+    InvalidParam,
+    ParamsUnmatched,
+    PauseTriggered,
+    SpecialOptionTriggered,
+)
+from ..manager import command_manager
 from ..model import HeadResult, OptionResult, SubcommandResult
 from ..output import output_manager
 from ..typing import TDC, InnerShortcutArgs
@@ -59,8 +68,9 @@ def default_compiler(analyser: SubAnalyser, pids: set[str]):
             pids.update(opts.aliases)
         elif isinstance(opts, Subcommand):
             sub = SubAnalyser(opts)
-            analyser.compile_params[opts.name] = sub
-            pids.add(opts.name)
+            for alias in opts.aliases:
+                analyser.compile_params[alias] = sub
+            pids.update(opts.aliases)
             default_compiler(sub, pids)
             if not set(analyser.command.separators).issuperset(opts.separators):
                 analyser.compact_params.append(sub)
@@ -110,6 +120,9 @@ class SubAnalyser(Generic[TDC]):
 
     def __post_init__(self):
         self.reset()
+        self.__calc_args__()
+
+    def __calc_args__(self):
         self.self_args = self.command.args
         if self.command.nargs > 0 and self.command.nargs > self.self_args.optional_count:
             self.need_main_args = True  # 如果need_marg那么match的元素里一定得有main_argument
@@ -154,13 +167,16 @@ class SubAnalyser(Generic[TDC]):
             ParamsUnmatched: 名称不匹配
             FuzzyMatchSuccess: 模糊匹配成功
         """
-        sub = argv.context = self.command
+        sub = argv.current_node = self.command
         if not trigger:
             name, _ = argv.next(sub.separators)
-            if name != sub.name:  # 先匹配节点名称
-                if argv.fuzzy_match and levenshtein(name, sub.name) >= argv.fuzzy_threshold:
-                    raise FuzzyMatchSuccess(lang.require("fuzzy", "matched").format(source=sub.name, target=name))
-                raise ParamsUnmatched(lang.require("subcommand", "name_error").format(target=name, source=sub.name))
+            if name not in sub.aliases:
+                if not argv.fuzzy_match:
+                    raise InvalidParam(lang.require("subcommand", "name_error").format(source=sub.dest, target=name))
+                for al in sub.aliases:
+                    if levenshtein(name, al) >= argv.fuzzy_threshold:
+                        raise FuzzyMatchSuccess(lang.require("fuzzy", "matched").format(source=al, target=name))
+                raise InvalidParam(lang.require("subcommand", "name_error").format(source=sub.dest, target=name))
 
         self.value_result = sub.action.value
         return self.analyse(argv)
@@ -217,24 +233,26 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
             compiler (TCompile | None, optional): 编译器方法
         """
         super().__init__(alconna)
-        self.fuzzy_match = alconna.meta.fuzzy_match
-        self.command_header = Header.generate(alconna.command, alconna.prefixes, alconna.meta.compact)
-        self.extra_allow = not alconna.meta.strict or not alconna.namespace_config.strict
-        compiler = compiler or default_compiler
-        compiler(self, command_manager.resolve(self.command).param_ids)
+        self._compiler = compiler or default_compiler
+
+    def compile(self, param_ids: set[str]):
+        self.extra_allow = not self.command.meta.strict or not self.command.namespace_config.strict
+        self.command_header = Header.generate(self.command.command, self.command.prefixes, self.command.meta.compact)
+        self._compiler(self, param_ids)
+        return self
 
     def __repr__(self):
         return f"<{self.__class__.__name__} of {self.command.path}>"
 
     def shortcut(
-        self, argv: Argv[TDC], data: list[Any], short: Arparma | InnerShortcutArgs, reg: Match | None = None
+        self, argv: Argv[TDC], data: list[Any], short: InnerShortcutArgs, reg: Match | None = None
     ) -> Arparma[TDC]:
         """处理被触发的快捷命令
 
         Args:
             argv (Argv[TDC]): 命令行参数
             data (list[Any]): 剩余参数
-            short (Arparma | InnerShortcutArgs): 快捷命令
+            short (InnerShortcutArgs): 快捷命令
             reg (Match | None): 可能的正则匹配结果
 
         Returns:
@@ -243,26 +261,27 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
         Raises:
             ParamsUnmatched: 若不允许快捷命令后随其他参数，则抛出此异常
         """
-        if isinstance(short, Arparma):
-            return short
-
         argv.build(short.command)  # type: ignore
         if not short.fuzzy and data:
             exc = ParamsUnmatched(lang.require("analyser", "param_unmatched").format(target=data[0]))
             if self.command.meta.raise_exception:
                 raise exc
             return self.export(argv, True, exc)
-        argv.addon(short.args)
+        argv.addon(short.args, merge_str=False)
         data = _handle_shortcut_data(argv, data)
-        if not data and argv.raw_data and any(isinstance(i, str) and "{%0}" in i for i in argv.raw_data):
+        if not data and argv.raw_data and any(isinstance(i, str) and bool(re.search(r"\{%(\d+)|\*(.*?)\}", i)) for i in argv.raw_data):
             exc = ArgumentMissing(lang.require("analyser", "param_missing"))
             if self.command.meta.raise_exception:
                 raise exc
             return self.export(argv, True, exc)
         argv.bak_data = argv.raw_data.copy()
-        argv.addon(data)
+        argv.addon(data, merge_str=False)
         if reg:
-            argv.raw_data = _handle_shortcut_reg(argv, reg.groups(), reg.groupdict(), short.wrapper)
+            data = _handle_shortcut_reg(argv, reg.groups(), reg.groupdict(), short.wrapper)
+            argv.raw_data.clear()
+            argv.ndata = 0
+            argv.current_index = 0
+            argv.addon(data)
         argv.bak_data = argv.raw_data.copy()
         return self.process(argv)
 
@@ -289,6 +308,7 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
                 if self.command.meta.raise_exception:
                     raise e
                 return self.export(argv, True, e)
+            argv.context[SHORTCUT_TRIGGER] = _next
             try:
                 rest, short, mat = command_manager.find_shortcut(self.command, [_next] + argv.release())
             except ValueError as exc:
@@ -296,8 +316,10 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
                     raise e from exc
                 return self.export(argv, True, e)
             else:
+                argv.context[SHORTCUT_ARGS] = short
+                argv.context[SHORTCUT_REST] = rest
+                argv.context[SHORTCUT_REGEX_MATCH] = mat
                 self.reset()
-                argv.reset()
                 return self.shortcut(argv, rest, short, mat)
 
         except FuzzyMatchSuccess as Fuzzy:
@@ -348,7 +370,7 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
                     return _SPECIAL[handler](self, argv)
             if comp_ctx.get(None):
                 if isinstance(e1, InvalidParam):
-                    argv.free(argv.context.separators if argv.context else None)
+                    argv.free(argv.current_node.separators if argv.current_node else None)
                 raise PauseTriggered(prompt(self, argv), e1, argv) from e1
             if self.command.meta.raise_exception:
                 raise
@@ -370,7 +392,7 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
             fail (bool, optional): 是否解析失败. Defaults to False.
             exception (Exception | None, optional): 解析失败时的异常. Defaults to None.
         """
-        result = Arparma(self.command.path, argv.origin, not fail, self.header_result)
+        result = Arparma(self.command.path, argv.origin, not fail, self.header_result, ctx=argv.exit())
         if fail:
             result.error_info = exception
             result.error_data = argv.release()

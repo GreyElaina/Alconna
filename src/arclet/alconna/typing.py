@@ -2,7 +2,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields, is_dataclass
-from typing import Any, Dict, Iterator, List, Literal, Protocol, Tuple, TypeVar, TypedDict, Union, runtime_checkable
+from typing import (
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Literal,
+    Protocol,
+    Tuple,
+    TypedDict,
+    TypeVar,
+    Union,
+    final,
+    runtime_checkable,
+)
 from typing_extensions import NotRequired
 
 from nepattern import BasePattern, MatchMode, parser
@@ -12,7 +25,7 @@ DataUnit = TypeVar("DataUnit", covariant=True)
 
 
 class ShortcutRegWrapper(Protocol):
-    def __call__(self, slot: int | str, content: str) -> Any: ...
+    def __call__(self, slot: int | str, content: str | None) -> Any: ...
 
 
 class ShortcutArgs(TypedDict):
@@ -28,6 +41,9 @@ class ShortcutArgs(TypedDict):
     """是否调用时保留指令前缀"""
     wrapper: NotRequired[ShortcutRegWrapper]
     """快捷指令的正则匹配结果的额外处理函数"""
+
+
+DEFAULT_WRAPPER = lambda slot, content: content
 
 
 class InnerShortcutArgs:
@@ -51,7 +67,7 @@ class InnerShortcutArgs:
         self.args = args or []
         self.fuzzy = fuzzy
         self.prefix = prefix
-        self.wrapper = wrapper or (lambda slot, content: content)
+        self.wrapper = wrapper or DEFAULT_WRAPPER
 
     def __repr__(self):
         return f"ShortcutArgs({self.command!r}, args={self.args!r}, fuzzy={self.fuzzy}, prefix={self.prefix})"
@@ -91,6 +107,8 @@ class CommandMeta:
     "命令是否允许第一个参数紧随头部"
     strict: bool = field(default=True)
     "命令是否严格匹配，若为 False 则未知参数将作为名为 $extra 的参数"
+    context_style: Literal["bracket", "parentheses"] | None = field(default=None)
+    "命令上下文插值的风格，None 为关闭，bracket 为 {...}，parentheses 为 $(...)"
     extra: Dict[str, Any] = field(default_factory=dict, hash=False)
     "命令的自定义额外信息"
 
@@ -99,6 +117,7 @@ TDC = TypeVar("TDC", bound=DataCollection[Any])
 T = TypeVar("T")
 
 
+@final
 class _AllParamPattern(BasePattern[Any, Any]):
     def __init__(self):
         super().__init__(mode=MatchMode.KEEP, origin=Any, alias="*")
@@ -107,7 +126,7 @@ class _AllParamPattern(BasePattern[Any, Any]):
         return input_
 
     def __calc_eq__(self, other):  # pragma: no cover
-        return isinstance(other, _AllParamPattern)
+        return other.__class__ is _AllParamPattern
 
 
 AllParam = _AllParamPattern()
@@ -188,8 +207,6 @@ Kw = _Kw()
 
 class KWBool(BasePattern):
     """对布尔参数的包装"""
-
-    ...
 
 
 class UnpackVar(BasePattern):

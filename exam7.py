@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-from arclet.alconna import Args
-from arclet.alconna.action import Action, store_true, store
-from typing import Literal, overload, Iterable, Any, Sequence
-from typing_extensions import Self
-from dataclasses import dataclass, field
 from pprint import pprint
+from dataclasses import dataclass, field
+from typing import Literal, Optional, overload
+from typing_extensions import Self
+
+from arclet.alconna import Args
+from arclet.alconna.action import Action, store, store_true
 
 
 @dataclass
 class Scope:
     refer: Node
     substance: dict[str, Node] = field(default_factory=dict)
+
 
 
 NodeMap: dict[str, Scope] = {}

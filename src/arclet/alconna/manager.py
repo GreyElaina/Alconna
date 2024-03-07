@@ -8,7 +8,7 @@ import shelve
 import weakref
 from copy import copy
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Match, Union
+from typing import TYPE_CHECKING, Match, MutableSet
 from weakref import WeakKeyDictionary, WeakValueDictionary
 
 from tarina import lang
@@ -17,7 +17,7 @@ from .argv import Argv, __argv_type__
 from .arparma import Arparma
 from .config import Namespace, config
 from .exceptions import ExceedMaxCount
-from .typing import TDC, CommandMeta, DataCollection, ShortcutArgs, InnerShortcutArgs
+from .typing import TDC, CommandMeta, InnerShortcutArgs, ShortcutArgs
 
 if TYPE_CHECKING:
     from ._internal._analyser import Analyser
@@ -39,7 +39,7 @@ class CommandManager:
     __analysers: WeakKeyDictionary[Alconna, Analyser]
     __argv: WeakKeyDictionary[Alconna, Argv]
     __abandons: list[Alconna]
-    __shortcuts: dict[str, dict[str, Union[Arparma, InnerShortcutArgs]]]
+    __shortcuts: dict[str, dict[str, InnerShortcutArgs]]
 
     def __init__(self):
         self.cache_path = f"{__file__.replace('manager.py', '')}manager_cache.db"
@@ -108,17 +108,9 @@ class CommandManager:
         if self.current_count >= self.max_count:
             raise ExceedMaxCount
         self.__argv.pop(command, None)
-        self.__argv[command] = __argv_type__.get()(
-            command.namespace_config,  # type: ignore
-            fuzzy_match=command.meta.fuzzy_match,  # type: ignore
-            fuzzy_threshold=command.meta.fuzzy_threshold,  # type: ignore
-            to_text=command.namespace_config.to_text,  # type: ignore
-            converter=command.namespace_config.converter,  # type: ignore
-            separators=command.separators,  # type: ignore
-            filter_crlf=not command.meta.keep_crlf,  # type: ignore
-        )
+        argv = self.__argv[command] = __argv_type__.get()(command.meta, command.namespace_config, command.separators)  # type: ignore
         self.__analysers.pop(command, None)
-        self.__analysers[command] = command.compile(None)
+        self.__analysers[command] = command.compile(param_ids=argv.param_ids)
         namespace = self.__commands.setdefault(command.namespace, WeakValueDictionary())
         if _cmd := namespace.get(command.name):
             if _cmd == command:
@@ -146,11 +138,11 @@ class CommandManager:
             namespace, name = self._command_part(command.path)
             raise ValueError(lang.require("manager", "undefined_command").format(target=f"{namespace}.{name}")) from e
 
-    def requires(self, *paths: str) -> zip[tuple[Analyser, Argv]]:  # type: ignore
+    def unpack(self, commands: MutableSet[Alconna]) -> "zip[tuple[Analyser, Argv]]":
         """获取多个命令解析器"""
         return zip(
-            [v for k, v in self.__analysers.items() if k.path in paths],
-            [v for k, v in self.__argv.items() if k.path in paths],
+            [v for k, v in self.__analysers.items() if k in commands],
+            [v for k, v in self.__argv.items() if k in commands],
         )
 
     def delete(self, command: Alconna | str) -> None:
@@ -167,6 +159,25 @@ class CommandManager:
             if self.__commands.get(namespace) == {}:
                 del self.__commands[namespace]
 
+    @contextlib.contextmanager
+    def update(self, command: Alconna):
+        """同步命令更改"""
+        if command not in self.__argv:
+            raise ValueError(lang.require("manager", "undefined_command").format(target=command.path))
+        command.formatter.remove(command)
+        argv = self.__argv.pop(command)
+        analyser = self.__analysers.pop(command)
+        yield
+        command._hash = command._calc_hash()
+        argv.namespace = command.namespace_config
+        argv.separators = command.separators
+        argv.compile(command.meta)
+        argv.param_ids.clear()
+        analyser.compile(argv.param_ids)
+        self.__argv[command] = argv
+        self.__analysers[command] = analyser
+        command.formatter.add(command)
+
     def is_disable(self, command: Alconna) -> bool:
         """判断命令是否被禁用"""
         return command in self.__abandons
@@ -180,41 +191,35 @@ class CommandManager:
         if not enabled and command not in self.__abandons:
             self.__abandons.append(command)
 
-    def add_shortcut(self, target: Alconna, key: str, source: Arparma | ShortcutArgs):
+    def add_shortcut(self, target: Alconna, key: str, source: ShortcutArgs):
         """添加快捷命令
 
         Args:
             target (Alconna): 目标命令
             key (str): 快捷命令的名称
-            source (Arparma | ShortcutArgs): 快捷命令的参数
+            source (ShortcutArgs): 快捷命令的参数
         """
         namespace, name = self._command_part(target.path)
         argv = self.resolve(target)
         _shortcut = self.__shortcuts.setdefault(f"{namespace}.{name}", {})
-        if isinstance(source, dict):
-            if source.get("prefix", False) and target.prefixes:
-                out = []
-                for prefix in target.prefixes:
-                    if not isinstance(prefix, str):
-                        continue
-                    _shortcut[f"{re.escape(prefix)}{key}"] = InnerShortcutArgs(
-                        **{**source, "command": argv.converter(prefix + source.get("command", str(target.command)))}
-                    )
-                    out.append(
-                        lang.require("shortcut", "add_success").format(shortcut=f"{prefix}{key}", target=target.path)
-                    )
-                return "\n".join(out)
-            _shortcut[key] = InnerShortcutArgs(
-                **{**source, "command": argv.converter(source.get("command", str(target.command)))}
-            )
-            return lang.require("shortcut", "add_success").format(shortcut=key, target=target.path)
-        elif source.matched:
-            _shortcut[key] = source
-            return lang.require("shortcut", "add_success").format(shortcut=key, target=target.path)
-        else:
-            raise ValueError(lang.require("manager", "incorrect_shortcut").format(target=f"{key}"))
+        if source.get("prefix", False) and target.prefixes:
+            out = []
+            for prefix in target.prefixes:
+                if not isinstance(prefix, str):
+                    continue
+                _shortcut[f"{re.escape(prefix)}{key}"] = InnerShortcutArgs(
+                    **{**source, "command": argv.converter(prefix + source.get("command", str(target.command)))}
+                )
+                out.append(
+                    lang.require("shortcut", "add_success").format(shortcut=f"{prefix}{key}", target=target.path)
+                )
+            return "\n".join(out)
+        _shortcut[key] = InnerShortcutArgs(
+            **{**source, "command": argv.converter(source.get("command", str(target.command)))}
+        )
+        return lang.require("shortcut", "add_success").format(shortcut=key, target=target.path)
 
-    def get_shortcut(self, target: Alconna[TDC]) -> dict[str, Union[Arparma[TDC], InnerShortcutArgs]]:
+    def get_shortcut(self, target: Alconna[TDC]) -> dict[str, InnerShortcutArgs]:
         """列出快捷命令
 
         Args:
@@ -224,15 +229,13 @@ class CommandManager:
             dict[str, Arparma | InnerShortcutArgs]: 快捷命令的参数
         """
         namespace, name = self._command_part(target.path)
-        if f"{namespace}.{name}" not in self.__analysers:
+        if target not in self.__analysers:
             raise ValueError(lang.require("manager", "undefined_command").format(target=f"{namespace}.{name}"))
-        if not (_shortcut := self.__shortcuts.get(f"{namespace}.{name}")):
-            return {}
-        return _shortcut
+        return self.__shortcuts.get(f"{namespace}.{name}", {})
 
     def find_shortcut(
-            self, target: Alconna[TDC], data: list
-    ) -> tuple[list, Arparma[TDC] | InnerShortcutArgs, Match[str] | None]:
+        self, target: Alconna[TDC], data: list
+    ) -> tuple[list, InnerShortcutArgs, Match[str] | None]:
         """查找快捷命令
 
         Args:
@@ -240,7 +243,7 @@ class CommandManager:
             data (list): 传入的命令数据
 
         Returns:
-            tuple[list, Union[Arparma, InnerShortcutArgs], re.Match[str]]: 返回匹配的快捷命令
+            tuple[list, InnerShortcutArgs, re.Match[str]]: 返回匹配的快捷命令
         """
         namespace, name = self._command_part(target.path)
         if not (_shortcut := self.__shortcuts.get(f"{namespace}.{name}")):

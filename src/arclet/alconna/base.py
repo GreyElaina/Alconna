@@ -6,7 +6,7 @@ from functools import reduce
 from typing import Any, Iterable, Sequence, overload
 from typing_extensions import Self
 
-from tarina import lang, Empty
+from tarina import Empty, lang
 
 from .action import Action, store
 from .args import Arg, Args
@@ -49,6 +49,8 @@ class CommandNode:
 
     name: str
     """命令节点名称"""
+    aliases: frozenset[str]
+    """命令节点别名"""
     dest: str
     """命令节点目标名称"""
     default: Any
@@ -64,7 +66,7 @@ class CommandNode:
 
     def __init__(
         self, name: str, args: Arg | Args | None = None,
-        dest: str | None = None, default: Any = Empty, action: Action | None = None,
+        alias: Iterable[str] | None = None, dest: str | None = None, default: Any = Empty, action: Action | None = None,
         separators: str | Sequence[str] | set[str] | None = None,
         help_text: str | None = None,
     ):
@@ -80,9 +82,18 @@ class CommandNode:
             separators (str | Sequence[str] | Set[str] | None, optional): 命令分隔符
             help_text (str | None, optional): 命令帮助信息
         """
+        aliases = list(alias or [])
+        name = name.replace(" ", "_")
+        if "|" in name:
+            _aliases = name.split("|")
+            _aliases.sort(key=len, reverse=True)
+            name = _aliases[0]
+            aliases.extend(_aliases[1:])
         if not name:
             raise InvalidArgs(lang.require("common", "name_empty"))
-        self.name = name.replace(" ", "_")
+        aliases.insert(0, name)
+        self.name = name
+        self.aliases = frozenset(aliases)
         self.args = Args() + args
         self.default = default
         self.action = action or store
@@ -135,7 +146,7 @@ class Option(CommandNode):
     相比命令节点, 命令选项可以设置别名, 优先级, 允许名称与后随参数之间无分隔符
     """
 
-    default: OptionResult | type[Empty]
+    default: OptionResult
     """命令选项默认值"""
     aliases: frozenset[str]
     """命令选项别名"""
@@ -163,20 +174,10 @@ class Option(CommandNode):
             help_text (str | None, optional): 命令选项帮助信息
             compact (bool, optional): 是否允许名称与后随参数之间无分隔符
         """
-        aliases = list(alias or [])
-        _name = name.split(" ")[-1]
-        if "|" in _name:
-            _aliases = _name.split("|")
-            _aliases.sort(key=len, reverse=True)
-            name = name.replace(_name, _aliases[0])
-            _name = _aliases[0]
-            aliases.extend(_aliases[1:])
-        aliases.insert(0, _name)
-        self.aliases = frozenset(aliases)
         self.compact = compact
         if default is not Empty:
             default = default if isinstance(default, OptionResult) else OptionResult(default)
-        super().__init__(name, args, dest, default, action, separators, help_text)
+        super().__init__(name, args, alias, dest, default, action, separators, help_text)
         if self.separators == ("",):
             self.compact = True
             self.separators = (" ",)
@@ -237,7 +238,8 @@ class Subcommand(CommandNode):
 
     与命令节点不同, 子命令可以包含多个命令选项与相对于自己的子命令
     """
-    default: SubcommandResult | type[Empty]
+
+    default: SubcommandResult
     """子命令默认值"""
     options: list[Option | Subcommand]
     """子命令包含的选项与子命令"""
@@ -246,6 +248,7 @@ class Subcommand(CommandNode):
         self,
         name: str,
         *args: Args | Arg | Option | Subcommand | list[Option | Subcommand],
+        alias: Iterable[str] | None = None,
         dest: str | None = None, default: Any = Empty,
         separators: str | Sequence[str] | set[str] | None = None,
         help_text: str | None = None,
@@ -270,7 +273,7 @@ class Subcommand(CommandNode):
         super().__init__(
             name,
             reduce(lambda x, y: x + y, [Args()] + [i for i in args if isinstance(i, (Arg, Args))]),  # type: ignore
-            dest, default, None, separators, help_text
+            alias, dest, default, None, separators, help_text,
         )
 
     def __add__(self, other: Option | Args | Arg | str) -> Self:

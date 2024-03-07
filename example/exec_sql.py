@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 from sqlite3 import connect
 from typing import Optional
-from arclet.alconna import Alconna, Arg, Option, KeyWordVar, MultiVar
+
+from arclet.alconna import Alconna, Arg, KeyWordVar, MultiVar, Option
 
 db = connect('example.db')
 

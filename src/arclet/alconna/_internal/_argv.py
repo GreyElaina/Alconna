@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, ClassVar, Generic, Iterable
+from dataclasses import dataclass, field, fields, InitVar
+from typing import Any, Callable, ClassVar, Generic, Iterable, Literal
 from typing_extensions import Self
 
 from tarina import lang, split, split_once
@@ -9,33 +9,40 @@ from tarina import lang, split, split_once
 from ..args import Arg
 from ..base import Option, Subcommand
 from ..config import Namespace, config
+from ..constraint import ARGV_OVERRIDES
 from ..exceptions import NullMessage
-from ..typing import TDC
+from ..typing import TDC, CommandMeta
 
 
 @dataclass(repr=True)
 class Argv(Generic[TDC]):
     """命令行参数"""
 
+    meta: InitVar[CommandMeta]
     namespace: Namespace = field(default=config.default_namespace)
-    fuzzy_match: bool = field(default=False)
-    """当前命令是否模糊匹配"""
-    fuzzy_threshold: float = field(default=0.6)
-    """模糊匹配阈值"""
-    to_text: Callable[[Any], str | None] = field(default=lambda x: x if isinstance(x, str) else None)
-    """将命令元素转换为文本, 或者返回None以跳过该元素"""
+    """命名空间"""
     separators: tuple[str, ...] = field(default=(" ",))
     """命令分隔符"""
-    converter: Callable[[str | list], TDC] = field(default=lambda x: x)
-    """将字符串或列表转为目标命令类型"""
-    filter_crlf: bool = field(default=True)
-    """是否过滤掉换行符"""
-    message_cache: bool = field(default=True)
-    """是否缓存消息"""
+
     param_ids: set[str] = field(default_factory=set)
     """节点名集合"""
 
-    context: Arg | Subcommand | Option | None = field(init=False)
+    fuzzy_match: bool = field(init=False)
+    """当前命令是否模糊匹配"""
+    fuzzy_threshold: float = field(init=False)
+    """模糊匹配阈值"""
+    to_text: Callable[[Any], str | None] = field(default=lambda x: x if isinstance(x, str) else None)
+    """将命令元素转换为文本, 或者返回None以跳过该元素"""
+    converter: Callable[[str | list], TDC] = field(default=lambda x: x)
+    """将字符串或列表转为目标命令类型"""
+    filter_crlf: bool = field(init=False)
+    """是否过滤掉换行符"""
+    message_cache: bool = field(init=False)
+    """是否缓存消息"""
+    context_style: Literal["bracket", "parentheses"] | None = field(init=False)
+    "命令上下文插值的风格，None 为关闭，bracket 为 {...}，parentheses 为 $(...)"
+
+    current_node: Arg | Subcommand | Option | None = field(init=False)
     """当前节点"""
     current_index: int = field(init=False)
     """当前数据的索引"""
@@ -47,21 +54,33 @@ class Argv(Generic[TDC]):
     """原始数据"""
     origin: TDC = field(init=False)
     """原始命令"""
+    context: dict[str, Any] = field(init=False, default_factory=dict)
+    special: dict[str, str] = field(init=False, default_factory=dict)
+    completion_names: set[str] = field(init=False, default_factory=set)
     _sep: tuple[str, ...] | None = field(init=False)
     _cache: ClassVar[dict[type, dict[str, Any]]] = {}
 
-    def __post_init__(self):
+    def __post_init__(self, meta: CommandMeta):
         self.reset()
-        self.special: dict[str, str] = {}
+        self.compile(meta)
+        if __cache := self.__class__._cache.get(self.__class__, {}):
+            self.to_text = __cache.get("to_text") or self.to_text
+            self.converter = __cache.get("converter") or self.converter
+
+    def compile(self, meta: CommandMeta):
+        self.fuzzy_match = meta.fuzzy_match
+        self.fuzzy_threshold = meta.fuzzy_threshold
+        self.to_text = self.namespace.to_text
+        self.converter = self.namespace.converter
+        self.filter_crlf = not meta.keep_crlf
+        self.context_style = meta.context_style
+        self.special = {}
         self.special.update(
             [(i, "help") for i in self.namespace.builtin_option_name["help"]]
             + [(i, "completion") for i in self.namespace.builtin_option_name["completion"]]
             + [(i, "shortcut") for i in self.namespace.builtin_option_name["shortcut"]]
         )
         self.completion_names = self.namespace.builtin_option_name["completion"]
-        if __cache := self.__class__._cache.get(self.__class__, {}):
-            self.to_text = __cache.get("to_text") or self.to_text
-            self.converter = __cache.get("converter") or self.converter
 
     def reset(self):
         """重置命令行参数"""
@@ -69,10 +88,10 @@ class Argv(Generic[TDC]):
         self.ndata = 0
         self.bak_data = []
         self.raw_data = []
-        self.origin = "None"
+        self.origin = "None"  # type: ignore
         self._sep = None
         self._next = None
-        self.context = None
+        self.current_node = None
 
     @property
     def done(self) -> bool:
@@ -108,11 +127,12 @@ class Argv(Generic[TDC]):
         self.bak_data = raw_data.copy()
         return self
 
-    def addon(self, data: Iterable[str | Any]) -> Self:
+    def addon(self, data: Iterable[str | Any], merge_str: bool = True) -> Self:
         """添加命令元素
 
         Args:
             data (Iterable[str | Any]): 命令元素
+            merge_str (bool, optional): 是否合并前后字符串
 
         Returns:
             Self: 自身
@@ -124,7 +144,7 @@ class Argv(Generic[TDC]):
                 d = res
             if isinstance(d, str) and not (d := d.strip()):
                 continue
-            if isinstance(d, str) and i > 0 and isinstance(self.raw_data[-1], str):
+            if merge_str and isinstance(d, str) and i > 0 and isinstance(self.raw_data[-1], str):
                 self.raw_data[-1] += f"{self.separators[0]}{d}"
             else:
                 self.raw_data.append(d)
@@ -222,3 +242,19 @@ class Argv(Generic[TDC]):
     def data_reset(self, data: list[str | Any], index: int):
         self.raw_data = data
         self.current_index = index
+
+    def enter(self, ctx: dict[str, Any] | None = None) -> Self:
+        """进入上下文"""
+        if ctx and ARGV_OVERRIDES in ctx:
+            field_names = [f.name for f in fields(self)]
+            for k, v in ctx[ARGV_OVERRIDES].items():
+                if k in field_names:
+                    setattr(self, k, v)
+        self.context = {} if ctx is None else ctx
+        return self
+
+    def exit(self) -> dict[str, Any]:
+        """退出上下文"""
+        _ = self.context
+        self.context = {}
+        return _

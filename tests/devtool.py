@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import traceback
 from collections import namedtuple
-from typing import Any
+from typing import Any, Literal
 
 from arclet.alconna._internal._analyser import Analyser, default_compiler
 from arclet.alconna._internal._handlers import analyse_args as ala
@@ -12,12 +12,15 @@ from arclet.alconna._internal._header import Header
 from arclet.alconna.args import Args
 from arclet.alconna.argv import Argv
 from arclet.alconna.base import Option, Subcommand
-from arclet.alconna.config import config
-from arclet.alconna.typing import DataCollection
+from arclet.alconna.config import Namespace
+from arclet.alconna.typing import DataCollection, CommandMeta
 
 
 class AnalyseError(Exception):
     """分析时发生错误"""
+
+
+dev_space = Namespace("devtool")
 
 
 class _DummyAnalyser(Analyser):
@@ -26,7 +29,7 @@ class _DummyAnalyser(Analyser):
     class _DummyALC:
         options = []
         meta = namedtuple("Meta", ["keep_crlf", "fuzzy_match", "raise_exception"])(False, False, True)
-        namespace_config = config.default_namespace
+        namespace_config = dev_space
 
     def __new__(cls, *args, **kwargs):
         cls.command = cls._DummyALC()  # type: ignore
@@ -36,9 +39,17 @@ class _DummyAnalyser(Analyser):
         return super().__new__(cls)
 
 
-def analyse_args(args: Args, command: list[str | Any], raise_exception: bool = True):
-    argv = Argv(config.default_namespace, message_cache=False, filter_crlf=True)
+def analyse_args(
+    args: Args,
+    command: list[str | Any],
+    raise_exception: bool = True,
+    context_style: Literal["bracket", "parentheses"] | None = None,
+    **kwargs
+):
+    meta = CommandMeta(keep_crlf=False, fuzzy_match=False, raise_exception=raise_exception, context_style=context_style)
+    argv = Argv(meta, dev_space)
     try:
+        argv.enter(kwargs)
         argv.build(["test"] + command)
         argv.next()
         return ala(argv, args)
@@ -55,10 +66,14 @@ def analyse_header(
     sep: str = " ",
     compact: bool = False,
     raise_exception: bool = True,
+    context_style: Literal["bracket", "parentheses"] | None = None,
+    **kwargs
 ):
-    argv = Argv(config.default_namespace, message_cache=False, filter_crlf=True, separators=(sep,))
+    meta = CommandMeta(keep_crlf=False, fuzzy_match=False, raise_exception=raise_exception, context_style=context_style)
+    argv = Argv(meta, dev_space, separators=(sep,))
     command_header = Header.generate(command_name, headers, compact=compact)
     try:
+        argv.enter(kwargs)
         argv.build(command)
         return alh(command_header, argv)
     except Exception as e:
@@ -67,8 +82,15 @@ def analyse_header(
         return
 
 
-def analyse_option(option: Option, command: DataCollection[str | Any], raise_exception: bool = True):
-    argv = Argv(config.default_namespace, message_cache=False, filter_crlf=True)
+def analyse_option(
+    option: Option,
+    command: DataCollection[str | Any],
+    raise_exception: bool = True,
+    context_style: Literal["bracket", "parentheses"] | None = None,
+    **kwargs
+):
+    meta = CommandMeta(keep_crlf=False, fuzzy_match=False, raise_exception=raise_exception, context_style=context_style)
+    argv = Argv(meta, dev_space)
     _analyser = _DummyAnalyser.__new__(_DummyAnalyser)
     _analyser.reset()
     _analyser.command.separators = (" ",)
@@ -77,6 +99,7 @@ def analyse_option(option: Option, command: DataCollection[str | Any], raise_exc
     default_compiler(_analyser, argv.param_ids)
     _analyser.command.options.clear()
     try:
+        argv.enter(kwargs)
         argv.build(command)
         alo(_analyser, argv, option)
         return _analyser.options_result[option.dest]
@@ -86,8 +109,15 @@ def analyse_option(option: Option, command: DataCollection[str | Any], raise_exc
         return
 
 
-def analyse_subcommand(subcommand: Subcommand, command: DataCollection[str | Any], raise_exception: bool = True):
-    argv = Argv(config.default_namespace, message_cache=False, filter_crlf=True)
+def analyse_subcommand(
+    subcommand: Subcommand,
+    command: DataCollection[str | Any],
+    raise_exception: bool = True,
+    context_style: Literal["bracket", "parentheses"] | None = None,
+    **kwargs
+):
+    meta = CommandMeta(keep_crlf=False, fuzzy_match=False, raise_exception=raise_exception, context_style=context_style)
+    argv = Argv(meta, dev_space)
     _analyser = _DummyAnalyser.__new__(_DummyAnalyser)
     _analyser.reset()
     _analyser.command.separators = (" ",)
@@ -96,6 +126,7 @@ def analyse_subcommand(subcommand: Subcommand, command: DataCollection[str | Any
     default_compiler(_analyser, argv.param_ids)
     _analyser.command.options.clear()
     try:
+        argv.enter(kwargs)
         argv.build(command)
         return _analyser.compile_params[subcommand.name].process(argv).result()  # type: ignore
     except Exception as e:

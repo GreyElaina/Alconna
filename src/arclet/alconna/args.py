@@ -8,11 +8,11 @@ from enum import Enum
 from typing import Any, Callable, Generic, Iterable, List, Sequence, Type, TypeVar, Union, cast
 from typing_extensions import Self, TypeAlias
 
-from nepattern import BasePattern, MatchMode, RawStr, UnionPattern, parser, NONE, ANY, AntiPattern
+from nepattern import ANY, NONE, AntiPattern, BasePattern, MatchMode, RawStr, UnionPattern, parser
 from tarina import Empty, get_signature, lang
 
-from .typing import KeyWordVar, MultiVar, MultiKeyWordVar, KWBool, UnpackVar, AllParam
 from .exceptions import InvalidArgs
+from .typing import AllParam, KeyWordVar, KWBool, MultiKeyWordVar, MultiVar, UnpackVar
 
 
 def safe_dcls_kw(**kwargs):
@@ -118,10 +118,10 @@ class Arg(Generic[_T]):
         _value = parser(value or RawStr(name))
         default = field if isinstance(field, Field) else Field(field)
         if isinstance(_value, UnionPattern) and _value.optional:
-            default.default = None if default.default is Empty else default.default
+            default.default = None if default.default is Empty else default.default  # type: ignore
         if _value == NONE:
             raise InvalidArgs(lang.require("args", "value_error").format(target=name))
-        self.value = _value
+        self.value = _value  # type: ignore
         self.field = default
         self.notice = notice
         self.separators = (seps,) if isinstance(seps, str) else tuple(seps)
@@ -136,7 +136,7 @@ class Arg(Generic[_T]):
         self.optional = ArgFlag.OPTIONAL in self.flag
         self.hidden = ArgFlag.HIDDEN in self.flag
         if ArgFlag.ANTI in self.flag and self.value not in (ANY, AllParam):
-            self.value = AntiPattern(self.value)
+            self.value = AntiPattern(self.value)  # type: ignore
 
     def __repr__(self):
         n, v = f"'{self.name}'", str(self.value)
@@ -332,6 +332,8 @@ class Args(metaclass=ArgsMeta):
                     if self.argument.vars_keyword or self.argument.vars_positional:
                         raise InvalidArgs(lang.require("args", "exclude_mutable_args"))
                     self.optional_count += 1
+                elif arg.field.default is not Empty:
+                    self.optional_count += 1
         self.argument.clear()
         self.argument.extend(_tmp)
         del _tmp
@@ -349,7 +351,7 @@ class Args(metaclass=ArgsMeta):
         Returns:
             Self | Arg: 参数集合自身或需要的参数单元
         """
-        if isinstance(item, str) and (res := next(filter(lambda x: x.name == item, self.argument), None)):
+        if res := next((x for x in self.argument if x.name == item), None):
             return res
         data: tuple[Arg, ...] | tuple[Any, ...] = item if isinstance(item, tuple) else (item,)
         if isinstance(data[0], Arg):

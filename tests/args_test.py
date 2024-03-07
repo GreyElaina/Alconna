@@ -238,6 +238,30 @@ def test_multi_multi():
     assert analyse_args(arg20_1, ["1 2 a b"]) == {"foo": (1, 2), "bar": ("a", "b")}
 
 
+def test_contextval():
+    arg21 = Args["foo", str]
+    assert analyse_args(arg21, ["$(bar)"], context_style="parentheses", bar="baz") == {"foo": "baz"}
+    assert analyse_args(arg21, ["{bar}"], context_style="parentheses", raise_exception=False, bar="baz") != {"foo": "baz"}
+
+    assert analyse_args(arg21, ["{bar}"], context_style="bracket", bar="baz") == {"foo": "baz"}
+    assert analyse_args(arg21, ["$(bar)"], context_style="bracket", raise_exception=False, bar="baz") != {"foo": "baz"}
+
+    class A:
+        class B:
+            c = "baz"
+            d = {"e": "baz"}
+
+        b = B()
+
+    assert analyse_args(arg21, ["$(a.b.c)"], context_style="parentheses", a=A()) == {"foo": "baz"}
+    assert analyse_args(arg21, ["$(a.b.d.get(e))"], context_style="parentheses", a=A()) == {"foo": "baz"}
+
+    arg21_1 = Args["foo", int]
+    assert analyse_args(arg21_1, ["$(bar)"], context_style="parentheses", bar=123) == {"foo": 123}
+    assert analyse_args(arg21_1, ["$(bar)"], context_style="parentheses", bar="123") == {"foo": 123}
+    assert analyse_args(arg21_1, ["$(bar)"], context_style="parentheses", raise_exception=False, bar="baz") != {"foo": 123}
+
+
 if __name__ == "__main__":
     import pytest
 

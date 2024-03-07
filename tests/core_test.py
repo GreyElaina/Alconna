@@ -194,6 +194,11 @@ def test_alconna_multi_header():
     assert alc6.parse("#core6").head_matched is False
     assert alc6.parse("! core6").head_matched is False
     assert alc6.parse([a]).head_matched is False
+    # 纯文字头可以塞分隔符
+    alc6_1 = Alconna("core6_1", ["/", "!", "aaa "])  # 'aaa ' 的空格是分隔符
+    assert alc6_1.parse("!core6_1").head_matched is True
+    assert alc6_1.parse("aaa core6_1").head_matched is True
+    assert alc6_1.parse("aaacore6_1").head_matched is False
     # 对头
     alc6_2 = Alconna("core6_2", [(a, "/"), (A, "!"), ("c", "."), (NUMBER, "d")])
     assert alc6_2.parse([a, "/core6_2"]).head_matched is True
@@ -444,6 +449,7 @@ def test_shortcut():
     res8 = alc16_1.parse("echo \\\\'123\\\\'")
     assert res8.content == "print('123')"
     assert not alc16_1.parse("echo").matched
+    assert alc16_1.parse("echo1").content == "print('')"
 
     alc16_2 = Alconna([1, 2, "3"], "core16_2", Args["foo", bool])
     alc16_2.shortcut("test", {"command": [1, "core16_2 True"]})  # type: ignore
@@ -493,12 +499,10 @@ def test_shortcut():
     alc16_7.shortcut("test 123", {"args": ["abc"]})
     assert alc16_7.parse("test 123").bar == "abc"
 
-    alc16_8 = Alconna("core16_8", Args["bar", str])
-    res11 = alc16_8.parse("core16_8 1234")
-    assert res11.bar == "1234"
-    alc16_8.parse("core16_8 --shortcut test _")
-    res12 = alc16_8.parse("test")
-    assert res12.bar == "1234"
+    alc16_9 = Alconna("core16_9", Args["bar", str])
+    alc16_9.shortcut("test(.+)?", command="core16_9 {0}")
+    assert alc16_9.parse("test123").bar == "123"
+    assert not alc16_9.parse("test").matched
 
 
 def test_help():
@@ -533,16 +537,22 @@ def test_help():
         )
     with output_manager.capture("core17") as cap:
         alc17.parse("core17 --help foo")
-        assert cap["output"] == "[foo] <bar: str> \nFoo bar"
+        assert cap["output"] == "foo <bar: str> \nFoo bar"
     with output_manager.capture("core17") as cap:
         alc17.parse("core17 foo --help")
-        assert cap["output"] == "[foo] <bar: str> \nFoo bar"
+        assert cap["output"] == "foo <bar: str> \nFoo bar"
     with output_manager.capture("core17") as cap:
         alc17.parse("core17 --help baz")
-        assert cap["output"] == "[baz] <qux: str> \nBaz qux"
+        assert cap["output"] == "baz <qux: str> \nBaz qux"
     with output_manager.capture("core17") as cap:
         alc17.parse("core17 baz --help")
-        assert cap["output"] == "[baz] <qux: str> \nBaz qux"
+        assert cap["output"] == "baz <qux: str> \nBaz qux"
+    with output_manager.capture("core17") as cap:
+        alc17.parse("core17 --help baz")
+        assert cap["output"] == "baz <qux: str> \nBaz qux"
+    with output_manager.capture("core17") as cap:
+        alc17.parse("core17 baz --help")
+        assert cap["output"] == "baz <qux: str> \nBaz qux"
     with output_manager.capture("core17") as cap:
         alc17.parse("core17 add --help")
         assert cap["output"] == "add <bar: str> \nAdd bar"
@@ -567,7 +577,7 @@ def test_help():
     )
     with output_manager.capture("core17_2") as cap:
         alc17_2.parse("core17_2 --help foo bar")
-        assert cap["output"] == "[bar] <baz: str> \nFoo bar"
+        assert cap["output"] == "bar <baz: str> \nFoo bar"
     with output_manager.capture("core17_2") as cap:
         alc17_2.parse("core17_2 --help foo")
         assert cap["output"] == "foo <abc: str> \nsub Foo\n\n可用的选项有:\n* Foo bar\n  bar <baz: str> \n"
@@ -705,9 +715,10 @@ def test_nest_subcommand():
         "core23",
         Args["foo", int],
         Subcommand(
-            "bar",
-            Subcommand("baz", Option("--qux"), help_text="test nest subcommand; deep 2"),
+            "bar|baar",
+            Subcommand("baz|baaz", Option("--qux"), dest="Baz", help_text="test nest subcommand; deep 2"),
             Args["abc", A],
+            dest="Bar",
             help_text="test nest subcommand; deep 1",
         ),
         meta=CommandMeta("test nest subcommand"),
@@ -716,7 +727,7 @@ def test_nest_subcommand():
     assert alc23.parse(["core23 bar baz", A(), "123"]).matched
     assert alc23.parse(["core23 bar baz --qux", A(), "123"]).matched
     assert not alc23.parse(["core23 bar baz", A(), "--qux 123"]).matched
-    assert alc23.parse(["core23 bar baz --qux", A(), "123"]).query("bar.baz.qux.value") is Ellipsis
+    assert alc23.parse(["core23 bar baz --qux", A(), "123"]).query("Bar.Baz.qux.value") is Ellipsis
     print("")
     # alc23.parse("core23 --help")
     alc23.parse("core23 bar baz --help")
