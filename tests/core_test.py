@@ -58,7 +58,7 @@ def test_alconna_multi_match():
 
 可用的子命令有:
 * 测试用例
-  test <test: Test> 
+  test <test: 'Test'> 
   该子命令内可用的选项有:
   * 输入用户名
     -u <username: str> 
@@ -456,8 +456,7 @@ def test_shortcut():
     assert alc16_2.parse([1, "core16_2 True"]).matched
     res9 = alc16_2.parse("test")
     assert res9.foo is True
-    res10 = alc16_2.parse([2, "test"])
-    assert res10.foo is True
+    assert not alc16_2.parse([2, "test"]).matched
     assert not alc16_2.parse("3test").matched
 
     alc16.parse("core16 --shortcut list")
@@ -487,13 +486,18 @@ def test_shortcut():
         return content
 
     alc16_6 = Alconna("core16_6", Args["bar", str])
-    alc16_6.shortcut("test(?P<bar>.+)?", wrapper=wrapper, arguments=["{bar}"])
+    alc16_6.shortcut("test(?P<bar>.+)?", fuzzy=False, wrapper=wrapper, arguments=["{bar}"])
     assert alc16_6.parse("testabc").bar == "abc"
 
     with output_manager.capture("core16_6") as cap:
         output_manager.set_action(lambda x: x, "core16_6")
         alc16_6.parse("testhelp")
-        assert cap["output"] == "core16_6 <bar: str> \nUnknown"
+        assert cap["output"] == """\
+core16_6 <bar: str> 
+Unknown
+快捷命令:
+'test(?P<bar>.+)?' => core16_6 {bar}\
+"""
 
     alc16_7 = Alconna("core16_7", Args["bar", str])
     alc16_7.shortcut("test 123", {"args": ["abc"]})
@@ -541,12 +545,6 @@ def test_help():
     with output_manager.capture("core17") as cap:
         alc17.parse("core17 foo --help")
         assert cap["output"] == "foo <bar: str> \nFoo bar"
-    with output_manager.capture("core17") as cap:
-        alc17.parse("core17 --help baz")
-        assert cap["output"] == "baz <qux: str> \nBaz qux"
-    with output_manager.capture("core17") as cap:
-        alc17.parse("core17 baz --help")
-        assert cap["output"] == "baz <qux: str> \nBaz qux"
     with output_manager.capture("core17") as cap:
         alc17.parse("core17 --help baz")
         assert cap["output"] == "baz <qux: str> \nBaz qux"
@@ -883,21 +881,13 @@ def test_tips():
 
     core27 = Alconna(
         "core27",
-        Arg(
-            "arg1",
-            Literal["1", "2"],
-            Field(unmatch_tips=lambda x: f"参数arg必须是1或2哦，不能是{x}"),
-        )
-        + Arg(
-            "arg2",
-            Literal["1", "2"],
-            Field(missing_tips=lambda: "缺少了arg参数哦"),
-        ),
+        Args["arg1", Literal["1", "2"], Field(unmatch_tips=lambda x: f"参数arg必须是1或2哦，不能是{x}")],
+        Args["arg2", Literal["1", "2"], Field(missing_tips=lambda: "缺少了arg参数哦")],
     )
     assert core27.parse("core27 1 1").matched
     assert str(core27.parse("core27 3 1").error_info) == "参数arg必须是1或2哦，不能是3"
     assert str(core27.parse("core27 1").error_info) == "缺少了arg参数哦"
-    assert str(core27.parse("core27 1 3").error_info) in ("参数 '3' 不正确, 其应该符合 '1|2'", "参数 '3' 不正确, 其应该符合 '2|1'")
+    assert str(core27.parse("core27 1 3").error_info) in ("参数 '3' 不正确, 其应该符合 \"'1'|'2'\"", "参数 '3' 不正确, 其应该符合 \"'2'|'1'\"")
     assert str(core27.parse("core27").error_info) == "参数 arg1 丢失"
 
 

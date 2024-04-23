@@ -249,7 +249,8 @@ class Subcommand(CommandNode):
         name: str,
         *args: Args | Arg | Option | Subcommand | list[Option | Subcommand],
         alias: Iterable[str] | None = None,
-        dest: str | None = None, default: Any = Empty,
+        dest: str | None = None,
+        default: Any = Empty,
         separators: str | Sequence[str] | set[str] | None = None,
         help_text: str | None = None,
     ):

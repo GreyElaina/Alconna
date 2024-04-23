@@ -41,6 +41,8 @@ class ShortcutArgs(TypedDict):
     """是否调用时保留指令前缀"""
     wrapper: NotRequired[ShortcutRegWrapper]
     """快捷指令的正则匹配结果的额外处理函数"""
+    humanized: NotRequired[str]
+    """快捷指令的人类可读描述"""
 
 
 DEFAULT_WRAPPER = lambda slot, content: content
@@ -51,9 +53,10 @@ class InnerShortcutArgs:
     args: list[Any]
     fuzzy: bool
     prefix: bool
+    prefixes: list[str]
     wrapper: ShortcutRegWrapper
 
-    __slots__ = ("command", "args", "fuzzy", "prefix", "wrapper")
+    __slots__ = ("command", "args", "fuzzy", "prefix", "prefixes", "wrapper")
 
     def __init__(
         self,
@@ -61,12 +64,14 @@ class InnerShortcutArgs:
         args: list[Any] | None = None,
         fuzzy: bool = True,
         prefix: bool = False,
+        prefixes: list[str] | None = None,
         wrapper: ShortcutRegWrapper | None = None
     ):
         self.command = command
         self.args = args or []
         self.fuzzy = fuzzy
         self.prefix = prefix
+        self.prefixes = prefixes or []
         self.wrapper = wrapper or DEFAULT_WRAPPER
 
     def __repr__(self):
@@ -101,6 +106,8 @@ class CommandMeta:
     "命令是否抛出异常"
     hide: bool = field(default=False)
     "命令是否对manager隐藏"
+    hide_shortcut: bool = field(default=False)
+    "命令的快捷指令是否在help信息中隐藏"
     keep_crlf: bool = field(default=False)
     "命令是否保留换行字符"
     compact: bool = field(default=False)
@@ -118,7 +125,7 @@ T = TypeVar("T")
 
 
 @final
-class _AllParamPattern(BasePattern[Any, Any]):
+class _AllParamPattern(BasePattern[Any, Any, Literal[MatchMode.KEEP]]):
     def __init__(self):
         super().__init__(mode=MatchMode.KEEP, origin=Any, alias="*")
 
@@ -132,12 +139,12 @@ class _AllParamPattern(BasePattern[Any, Any]):
 AllParam = _AllParamPattern()
 
 
-class KeyWordVar(BasePattern[T, Any]):
+class KeyWordVar(BasePattern[T, Any, Literal[MatchMode.KEEP]]):
     """对具名参数的包装"""
 
     base: BasePattern
 
-    def __init__(self, value: BasePattern[T, Any] | type[T], sep: str = "="):
+    def __init__(self, value: BasePattern[T, Any, Any] | type[T], sep: str = "="):
         """构建一个具名参数
 
         Args:
@@ -156,21 +163,21 @@ class KeyWordVar(BasePattern[T, Any]):
 class _Kw:
     __slots__ = ()
 
-    def __getitem__(self, item: BasePattern[T, Any] | type[T]):
+    def __getitem__(self, item: BasePattern[T, Any, Any] | type[T]):
         return KeyWordVar(item)
 
     __matmul__ = __getitem__
     __rmatmul__ = __getitem__
 
 
-class MultiVar(BasePattern[T, Any]):
+class MultiVar(BasePattern[T, Any, Literal[MatchMode.KEEP]]):
     """对可变参数的包装"""
 
-    base: BasePattern[T, Any]
+    base: BasePattern[T, Any, Any]
     flag: Literal["+", "*"]
     length: int
 
-    def __init__(self, value: BasePattern[T, Any] | type[T], flag: int | Literal["+", "*"] = "+"):
+    def __init__(self, value: BasePattern[T, Any, Any] | type[T], flag: int | Literal["+", "*"] = "+"):
         """构建一个可变参数
 
         Args:

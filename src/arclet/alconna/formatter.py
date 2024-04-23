@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 from weakref import WeakKeyDictionary
 
 from nepattern import ANY, AnyString
@@ -9,7 +9,7 @@ from tarina import Empty, lang
 
 from .args import Arg, Args
 from .base import Option, Subcommand
-from .typing import AllParam
+from .typing import AllParam, InnerShortcutArgs
 
 if TYPE_CHECKING:
     from .core import Alconna
@@ -28,6 +28,14 @@ def resolve(parts: list[str], options: list[Option | Subcommand]):
             return sub if (sub := resolve(parts, opt.options)) else opt
     return resolve(parts, options)
 
+
+class TraceHead(TypedDict):
+    name: str
+    description: str
+    usage: str | None
+    example: str | None
+
+
 @dataclass(eq=True)
 class Trace:
     """存放命令节点数据的结构
@@ -35,10 +43,11 @@ class Trace:
     该结构用于存放命令节点的数据，包括命令节点的头部、参数、分隔符和主体。
     """
 
-    head: dict[str, Any]
+    head: TraceHead
     args: Args
     separators: tuple[str, ...]
     body: list[Option | Subcommand]
+    shortcuts: dict[str, Any]
 
 
 class TextFormatter:
@@ -48,7 +57,7 @@ class TextFormatter:
     """
 
     def __init__(self):
-        self.data = WeakKeyDictionary()
+        self.data: "WeakKeyDictionary[Alconna, Trace]" = WeakKeyDictionary()
         self.ignore_names = set()
 
     def add(self, base: Alconna):
@@ -59,7 +68,6 @@ class TextFormatter:
         res = Trace(
             {
                 "name": base.header_display,
-                "prefix": [],
                 "description": base.meta.description,
                 "usage": base.meta.usage,
                 "example": base.meta.example,
@@ -67,8 +75,15 @@ class TextFormatter:
             base.args,
             base.separators,
             base.options.copy(),
+            {} if base.meta.hide_shortcut else base._get_shortcuts(),
         )
         self.data[base] = res
+        return self
+
+    def update_shortcut(self, base: Alconna):
+        """更新目标命令的快捷指令"""
+        if not base.meta.hide_shortcut:
+            self.data[base].shortcuts = base._get_shortcuts()
         return self
 
     def remove(self, base: Alconna):
@@ -87,15 +102,9 @@ class TextFormatter:
                 return self.format(trace)
             end = resolve(parts, trace.body)
             if isinstance(end, Option):
-                return self.format(Trace(
-                    {"name": "", "prefix": list(end.aliases), "description": end.help_text}, end.args,
-                    end.separators, []
-                ))
+                return self.format(Trace({"name": "│".join(end.aliases), "description": end.help_text, 'example': None, 'usage': None}, end.args, end.separators, [], {}))  # noqa: E501
             if isinstance(end, Subcommand):
-                return self.format(Trace(
-                    {"name": "", "prefix": list(end.aliases), "description": end.help_text}, end.args,
-                    end.separators, end.options  # type: ignore
-                ))
+                return self.format(Trace({"name": "│".join(end.aliases), "description": end.help_text, 'example': None, 'usage': None}, end.args, end.separators, end.options, {}))  # noqa: E501
             return self.format(trace)
 
         return "\n".join([_handle(v) for v in self.data.values()])
@@ -106,16 +115,19 @@ class TextFormatter:
         Args:
             trace (Trace): 命令节点数据
         """
-        title, desc, usage, example = self.header(trace.head, trace.separators)
+        title, desc, usage, example = self.header(trace.head)
         param = self.parameters(trace.args)
         body = self.body(trace.body)
-        res = f"{title} {param}\n{desc}"
+        res = f"{title}{trace.separators[0]}{param}\n{desc}"
+        shortcuts = self.shortcut(trace.shortcuts)
         if usage:
             res += f"\n{usage}"
         if body:
             res += f"\n\n{body}"
         if example:
             res += f"\n{example}"
+        if shortcuts:
+            res += f"\n{shortcuts}"
         return res
 
     def param(self, parameter: Arg) -> str:
@@ -160,25 +172,16 @@ class TextFormatter:
             else res
         )
 
-    def header(self, root: dict[str, Any], separators: tuple[str, ...]) -> tuple[str, str, str, str]:
+    def header(self, root: TraceHead) -> tuple[str, str, str, str]:
         """头部节点的描述
 
         Args:
-            root (dict[str, Any]): 头部节点数据
-            separators (tuple[str, ...]): 分隔符
+            root (TraceHead): 头部节点数据
         """
-        help_string = f"{desc}" if (desc := root.get("description")) else ""
+        help_string = f"{desc}" if (desc := root["description"]) else ""
         usage = f"{lang.require('format', 'usage')}:\n{usage}" if (usage := root.get("usage")) else ""
         example = f"{lang.require('format', 'example')}:\n{example}" if (example := root.get("example")) else ""
-        if not (_prefixs := root.get("prefix", [])):
-            prefixs = ""
-        elif len(_prefixs) == 1:
-            prefixs = _prefixs[0]
-        else:
-            prefixs = f"[{''.join(map(str, _prefixs))}]"
-        cmd = f"{prefixs}{root.get('name', '')}"
-        command_string = cmd or (root["name"] + separators[0])
-        return command_string, help_string, usage, example
+        return root["name"], help_string, usage, example
 
     def opt(self, node: Option) -> str:
         """对单个选项的描述"""
@@ -190,7 +193,7 @@ class TextFormatter:
 
     def sub(self, node: Subcommand) -> str:
         """对单个子命令的描述"""
-        alias_text = "|".join(node.aliases)
+        alias_text = "│".join(node.aliases)
         opt_string = "".join(
             [self.opt(opt).replace("\n", "\n  ").replace("# ", "* ") for opt in node.options if isinstance(opt, Option)]
         )
@@ -218,6 +221,20 @@ class TextFormatter:
         option_help = f"{lang.require('format', 'options')}:\n" if option_string else ""
         subcommand_help = f"{lang.require('format', 'subcommands')}:\n" if subcommand_string else ""
         return f"{subcommand_help}{subcommand_string}{option_help}{option_string}"
+
+    def shortcut(self, shortcuts: dict[str, Any]) -> str:
+        """快捷指令的描述"""
+        if not shortcuts:
+            return ""
+        result = []
+        for key, short in shortcuts.items():
+            if isinstance(short, InnerShortcutArgs):
+                _key = key + (" ...args" if short.fuzzy else "")
+                prefixes = f"[{'│'.join(short.prefixes)}]" if short.prefixes else ""
+                result.append(f"'{prefixes}{_key}' => {prefixes}{short.command} {' '.join(short.args)}")
+            else:
+                result.append(f"'{key}' => {short.origin!r}")
+        return f"{lang.require('format', 'shortcuts')}:\n" + "\n".join(result)
 
 
 __all__ = ["TextFormatter", "Trace"]

@@ -26,6 +26,7 @@ if __name__ == "__main__":
         argv.build(msg)
         analyser.process(argv)
         sec += time.perf_counter() - st
+    print(f"cost: {sec:.2f}s")
     print(f"Alconna: {count / sec:.2f}msg/s")
 
     print("RUN 2:")

@@ -17,7 +17,7 @@ from .config import Namespace, config
 from .exceptions import NullMessage
 from .formatter import TextFormatter
 from .manager import ShortcutArgs, command_manager
-from .typing import TDC, CommandMeta, DataCollection, ShortcutRegWrapper, TPrefixes
+from .typing import TDC, CommandMeta, DataCollection, InnerShortcutArgs, ShortcutRegWrapper, TPrefixes
 
 T = TypeVar("T")
 TCallable = TypeVar("TCallable", bound=Callable[..., Any])
@@ -85,7 +85,7 @@ class Alconna(Subcommand, Generic[TDC]):
 
     def compile(self, compiler: TCompile | None = None, param_ids: set[str] | None = None) -> Analyser[TDC]:
         """编译 `Alconna` 为对应的解析器"""
-        return Analyser(self, compiler).compile(param_ids)
+        return Analyser(self, compiler).compile(set() if param_ids is None else param_ids)
 
     def __init__(
         self,
@@ -135,6 +135,7 @@ class Alconna(Subcommand, Generic[TDC]):
         _args = sum((i for i in args if isinstance(i, (Args, Arg))), Args())
         super().__init__("ALCONNA::", _args, *options, dest=name, separators=separators or ns_config.separators, help_text=self.meta.description)  # noqa: E501
         self.name = name
+        self.aliases = frozenset((name,))
         self.behaviors = []
         for behavior in behaviors or []:
             self.behaviors.extend(requirement_handler(behavior))
@@ -160,7 +161,11 @@ class Alconna(Subcommand, Generic[TDC]):
             self.path = f"{self.namespace}::{self.name}"
             if header:
                 self.prefixes = namespace.prefixes.copy()
-            self.options = self.options[:-3]
+                name = f"{self.command or self.prefixes[0]}"  # type: ignore
+                self.dest = name
+                self.path = f"{self.namespace}::{name}"
+                self.aliases = frozenset((name,))
+            self.options = [opt for opt in self.options if not isinstance(opt, (Help, Completion, Shortcut))]
             add_builtin_options(self.options, namespace)
             self.meta.fuzzy_match = namespace.fuzzy_match or self.meta.fuzzy_match
             self.meta.raise_exception = namespace.raise_exception or self.meta.raise_exception
@@ -175,8 +180,16 @@ class Alconna(Subcommand, Generic[TDC]):
         result = []
         shortcuts = command_manager.get_shortcut(self)
         for key, short in shortcuts.items():
-            result.append(key + (" ...args" if short.fuzzy else ""))
+            if isinstance(short, InnerShortcutArgs):
+                prefixes = f"[{'│'.join(short.prefixes)}]" if short.prefixes else ""
+                result.append(prefixes + key + (" ...args" if short.fuzzy else ""))
+            else:
+                result.append(key)
         return result
+
+    def _get_shortcuts(self):
+        """返回该命令注册的快捷命令"""
+        return command_manager.get_shortcut(self)
 
     @overload
     def shortcut(self, key: str, args: ShortcutArgs | None = None) -> str:
@@ -204,6 +217,7 @@ class Alconna(Subcommand, Generic[TDC]):
         fuzzy: bool = True,
         prefix: bool = False,
         wrapper: ShortcutRegWrapper | None = None,
+        humanized: str | None = None,
     ) -> str:
         """操作快捷命令
 
@@ -214,6 +228,7 @@ class Alconna(Subcommand, Generic[TDC]):
             fuzzy (bool, optional): 是否允许命令后随参数, 默认为 `True`
             prefix (bool, optional): 是否调用时保留指令前缀, 默认为 `False`
             wrapper (ShortcutRegWrapper, optional): 快捷指令的正则匹配结果的额外处理函数, 默认为 `None`
+            humanized (str, optional): 快捷指令的人类可读描述, 默认为 `None`
 
         Returns:
             str: 操作结果
@@ -269,7 +284,7 @@ class Alconna(Subcommand, Generic[TDC]):
             Self: 命令本身
         """
         with command_manager.update(self):
-            self.options.insert(-3, opt)
+            self.options.append(opt)
         return self
 
     @init_spec(Option, is_method=True)

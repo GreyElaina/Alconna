@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable, Callable
 
-from nepattern import ANY, STRING, AnyString, BasePattern
-from nepattern.util import TPattern
+from nepattern import ANY, STRING, AnyString, BasePattern, TPattern
 from tarina import Empty, lang, safe_eval, split_once
+from typing_extensions import NoReturn
 
 from ..action import Action
 from ..args import Arg, Args
 from ..base import Option, Subcommand
 from ..completion import Prompt, comp_ctx
 from ..config import config
-from ..exceptions import ArgumentMissing, FuzzyMatchSuccess, InvalidParam, PauseTriggered, SpecialOptionTriggered
+from ..exceptions import AlconnaException, ArgumentMissing, FuzzyMatchSuccess, InvalidParam, PauseTriggered, SpecialOptionTriggered
 from ..model import HeadResult, OptionResult
 from ..output import output_manager
 from ..typing import KWBool, MultiKeyWordVar, MultiVar, ShortcutRegWrapper
-from ._header import Double, Header
+from ._header import Double, Header, Pair
 from ._util import escape, levenshtein, unescape
 
 if TYPE_CHECKING:
@@ -48,7 +48,7 @@ def _context(argv: Argv, target: Arg[Any], _arg: str):
         )
 
 
-def _validate(argv: Argv, target: Arg[Any], value: BasePattern[Any, Any], result: dict[str, Any], arg: Any, _str: bool):
+def _validate(argv: Argv, target: Arg[Any], value: BasePattern[Any, Any, Any], result: dict[str, Any], arg: Any, _str: bool):
     _arg = arg
     if _str and argv.context_style:
         _arg = _context(argv, target, _arg)
@@ -87,7 +87,7 @@ def step_varpos(argv: Argv, args: Args, slot: tuple[MultiVar, Arg], result: dict
             break
         if _str and may_arg in config.remainders:
             break
-        if _str and kwonly_seps and split_once(pat.match(may_arg)["name"], kwonly_seps, argv.filter_crlf)[0] in args.argument.keyword_only:  # noqa: E501
+        if _str and kwonly_seps and split_once(pat.match(may_arg)["name"], kwonly_seps, argv.filter_crlf)[0] in args.argument.keyword_only:  # noqa: E501  # type: ignore
             argv.rollback(may_arg)
             break
         if _str and args.argument.vars_keyword and args.argument.vars_keyword[0][0].base.sep in may_arg:
@@ -124,6 +124,8 @@ def step_varkey(argv: Argv, slot: tuple[MultiKeyWordVar, Arg], result: dict[str,
                 raise SpecialOptionTriggered(argv.special[may_arg])
         if not may_arg or (_str and may_arg in argv.param_ids) or not _str:
             argv.rollback(may_arg)
+            break
+        if _str and may_arg in config.remainders:
             break
         if _str and may_arg in config.remainders:
             break
@@ -168,7 +170,7 @@ def step_keyword(argv: Argv, args: Args, result: dict[str, Any]):
         if _str and may_arg in config.remainders:
             break
         key, _m_arg = split_once(may_arg, kwonly_seps1, argv.filter_crlf)
-        _key = pat.match(key)["name"]
+        _key = pat.match(key)["name"]  # type: ignore
         if _key not in args.argument.keyword_only:
             _key = key
         if _key not in args.argument.keyword_only:
@@ -288,6 +290,7 @@ def handle_option(argv: Argv, opt: Option, trigger: str | None = None) -> tuple[
         elif name in opt.aliases:
             error = False
         if error:
+            argv.rollback(name)
             if not argv.fuzzy_match:
                 raise InvalidParam(lang.require("option", "name_error").format(source=opt.dest, target=name))
             for al in opt.aliases:
@@ -353,18 +356,34 @@ def analyse_compact_params(analyser: SubAnalyser, argv: Argv):
         _data, _index = argv.data_set()
         try:
             if param.__class__ is Option:
-                analyse_option(analyser, argv, param)
+                oparam: Option = param  # type: ignore
+                analyse_option(analyser, argv, oparam)
             else:
+                sparam: SubAnalyser = param  # type: ignore
                 try:
-                    param.process(argv)
-                finally:
-                    analyser.subcommands_result[param.command.dest] = param.result()
+                    sparam.process(argv)
+                except (FuzzyMatchSuccess, PauseTriggered, SpecialOptionTriggered):
+                    sparam.result()
+                    raise
+                except InvalidParam:
+                    if argv.current_node is sparam.command:
+                        sparam.result()
+                    else:
+                        analyser.subcommands_result[sparam.command.dest] = sparam.result()
+                    raise
+                except AlconnaException:
+                    analyser.subcommands_result[sparam.command.dest] = sparam.result()
+                    raise
+                else:
+                    analyser.subcommands_result[sparam.command.dest] = sparam.result()
             _data.clear()
             return True
         except InvalidParam as e:
             if argv.current_node.__class__ is Arg:
                 raise e
             argv.data_reset(_data, _index)
+    else:
+        return False
 
 
 def handle_opt_default(defaults: dict[str, tuple[OptionResult, Action]], data: dict[str, OptionResult]):
@@ -394,12 +413,26 @@ def analyse_param(analyser: SubAnalyser, argv: Argv, seps: tuple[str, ...] | Non
         if _text in analyser.compile_params:
             _param = analyser.compile_params[_text]
             if _param.__class__ is Option:
-                analyse_option(analyser, argv, _param, _text)
+                oparam: Option = _param  # type: ignore
+                analyse_option(analyser, argv, oparam, _text)
             else:
+                sparam: SubAnalyser = _param  # type: ignore
                 try:
-                    _param.process(argv, _text)
-                finally:
-                    analyser.subcommands_result[_param.command.dest] = _param.result()
+                    sparam.process(argv, _text)
+                except (FuzzyMatchSuccess, PauseTriggered, SpecialOptionTriggered):
+                    sparam.result()
+                    raise
+                except InvalidParam:
+                    if argv.current_node is sparam.command:
+                        sparam.result()
+                    else:
+                        analyser.subcommands_result[sparam.command.dest] = sparam.result()
+                    raise
+                except AlconnaException:
+                    analyser.subcommands_result[sparam.command.dest] = sparam.result()
+                    raise
+                else:
+                    analyser.subcommands_result[sparam.command.dest] = sparam.result()
             argv.current_node = None
             return True
     argv.rollback(_text)
@@ -418,64 +451,97 @@ def analyse_param(analyser: SubAnalyser, argv: Argv, seps: tuple[str, ...] | Non
     return False
 
 
-def analyse_header(header: Header, argv: Argv) -> HeadResult:
-    """分析头部
-
-    Args:
-        header (Header): 头部
-        argv (Argv): 命令行参数
-
-    Returns:
-        HeadResult: 分析结果
-    """
+def _header_handle0(header: "Header[set[str], TPattern]", argv: Argv):
     content = header.content
-    mapping = header.mapping
     head_text, _str = argv.next()
     if _str:
-        if content.__class__ is set and head_text in content:
-            return HeadResult(head_text, head_text, True, fixes=mapping)
-        elif content.__class__ is TPattern and (mat := content.fullmatch(head_text)):
-            return HeadResult(head_text, head_text, True, mat.groupdict(), mapping)
-        if header.compact and content.__class__ in (set, TPattern) and (mat := header.compact_pattern.match(head_text)):
+        if head_text in content:
+            return HeadResult(head_text, head_text, True, fixes=header.mapping)
+        if header.compact and (mat := header.compact_pattern.match(head_text)):
             argv.rollback(head_text[len(mat[0]):], replace=True)
-            return HeadResult(mat[0], mat[0], True, mat.groupdict(), mapping)
-    if isinstance(content, BasePattern):
-        if (val := content.validate(head_text)).success:
-            return HeadResult(head_text, val._value, True, fixes=mapping)
-        if header.compact and (val := header.compact_pattern.validate(head_text)).success:
-            if _str:
-                argv.rollback(head_text[len(str(val._value)):], replace=True)
-            return HeadResult(val._value, val._value, True, fixes=mapping)
-
+            return HeadResult(mat[0], mat[0], True, mat.groupdict(), header.mapping)
     may_cmd, _m_str = argv.next()
     if _m_str:
         cmd = f"{head_text}{argv.separators[0]}{may_cmd}"
-        if content.__class__ is set and cmd in content:
-            return HeadResult(cmd, cmd, True, fixes=mapping)
-        elif content.__class__ is TPattern and (mat := content.fullmatch(cmd)):
-            return HeadResult(cmd, cmd, True, mat.groupdict(), mapping)
-        if header.compact and content.__class__ in (set, TPattern) and (
-            mat := header.compact_pattern.match(cmd)
-        ):
+        if cmd in content:
+            return HeadResult(cmd, cmd, True, fixes=header.mapping)
+        if header.compact and (mat := header.compact_pattern.match(cmd)):
             argv.rollback(cmd[len(mat[0]):], replace=True)
-            return HeadResult(mat[0], mat[0], True, mat.groupdict(), mapping)
-    if content.__class__ is list and _m_str:
-        for pair in content:
+            return HeadResult(mat[0], mat[0], True, mat.groupdict(), header.mapping)
+    _after_analyse_header(header, argv, head_text, may_cmd, _str, _m_str)
+
+
+def _header_handle1(header: "Header[TPattern, TPattern]", argv: Argv):
+    content = header.content
+    head_text, _str = argv.next()
+    if _str:
+        if mat := content.fullmatch(head_text):
+            return HeadResult(head_text, head_text, True, mat.groupdict(), header.mapping)
+        if header.compact and (mat := header.compact_pattern.match(head_text)):
+            argv.rollback(head_text[len(mat[0]):], replace=True)
+            return HeadResult(mat[0], mat[0], True, mat.groupdict(), header.mapping)
+    may_cmd, _m_str = argv.next()
+    if _m_str:
+        cmd = f"{head_text}{argv.separators[0]}{may_cmd}"
+        if mat := content.fullmatch(cmd):
+            return HeadResult(cmd, cmd, True, mat.groupdict(), header.mapping)
+        if header.compact and (mat := header.compact_pattern.match(cmd)):
+            argv.rollback(cmd[len(mat[0]):], replace=True)
+            return HeadResult(mat[0], mat[0], True, mat.groupdict(), header.mapping)
+    _after_analyse_header(header, argv, head_text, may_cmd, _str, _m_str)
+
+
+def _header_handle2(header: "Header[BasePattern, BasePattern]", argv: Argv):
+    head_text, _str = argv.next()
+    if (val := header.content.validate(head_text)).success:
+        return HeadResult(head_text, val._value, True, fixes=header.mapping)
+    if header.compact and (val := header.compact_pattern.validate(head_text)).success:
+        if _str:
+            argv.rollback(head_text[len(str(val._value)):], replace=True)
+        return HeadResult(val._value, val._value, True, fixes=header.mapping)
+    may_cmd, _m_str = argv.next()
+    _after_analyse_header(header, argv, head_text, may_cmd, _str, _m_str)
+
+
+def _header_handle3(header: "Header[list[Pair], Any]", argv: Argv):
+    head_text, _str = argv.next()
+    may_cmd, _m_str = argv.next()
+    if _m_str:
+        for pair in header.content:
             if res := pair.match(head_text, may_cmd, argv.rollback, header.compact):
-                return HeadResult(*res, fixes=mapping)
-    if content.__class__ is Double and (
-        res := content.match(head_text, may_cmd, _str, _m_str, argv.rollback, header.compact)
-    ):
-        return HeadResult(*res, fixes=mapping)
+                return HeadResult(*res, fixes=header.mapping)
+    _after_analyse_header(header, argv, head_text, may_cmd, _str, _m_str)
+
+
+def _header_handle4(header: "Header[Double, Any]", argv: Argv):
+    head_text, _str = argv.next()
+    may_cmd, _m_str = argv.next()
+
+    if res := header.content.match(head_text, may_cmd, _str, _m_str, argv.rollback, header.compact):
+        return HeadResult(*res, fixes=header.mapping)
+    _after_analyse_header(header, argv, head_text, may_cmd, _str, _m_str)
+
+
+HEAD_HANDLES: dict[int, Callable[[Header, Argv], HeadResult]] = {
+    0: _header_handle0,
+    1: _header_handle1,
+    2: _header_handle2,
+    3: _header_handle3,
+    4: _header_handle4,
+}
+
+
+def _after_analyse_header(header: Header, argv: Argv, head_text: Any, may_cmd: Any, _str: bool, _m_str: bool) -> NoReturn:
     if _str:
         argv.rollback(may_cmd)
         if argv.fuzzy_match:
             _handle_fuzzy(header, head_text, argv.fuzzy_threshold)
         raise InvalidParam(lang.require("header", "error").format(target=head_text), head_text)
     if _m_str and may_cmd:
+        cmd = f"{head_text}{argv.separators[0]}{may_cmd}"
         if argv.fuzzy_match:
-            _handle_fuzzy(header, f"{head_text}{argv.separators[0]}{may_cmd}", argv.fuzzy_threshold)
-        raise InvalidParam(lang.require("header", "error").format(target=may_cmd), may_cmd)
+            _handle_fuzzy(header, cmd, argv.fuzzy_threshold)
+        raise InvalidParam(lang.require("header", "error").format(target=cmd), cmd)
     argv.rollback(may_cmd)
     raise InvalidParam(lang.require("header", "error").format(target=head_text), None)
 
@@ -677,7 +743,7 @@ def prompt(analyser: Analyser, argv: Argv, trigger: str | None = None):
     if isinstance(_trigger, Arg):
         return _prompt_unit(analyser, argv, _trigger)
     elif isinstance(_trigger, Subcommand):
-        return [Prompt(i) for i in analyser.get_sub_analyser(_trigger).compile_params]
+        return [Prompt(i) for i in analyser.get_sub_analyser(_trigger).compile_params]  # type: ignore
     elif isinstance(_trigger, str):
         res = list(filter(lambda x: _trigger in x, analyser.compile_params))
         if not res:

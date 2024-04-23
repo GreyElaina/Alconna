@@ -17,7 +17,7 @@ from .argv import Argv, __argv_type__
 from .arparma import Arparma
 from .config import Namespace, config
 from .exceptions import ExceedMaxCount
-from .typing import TDC, CommandMeta, InnerShortcutArgs, ShortcutArgs
+from .typing import TDC, CommandMeta, DataCollection, InnerShortcutArgs, ShortcutArgs
 
 if TYPE_CHECKING:
     from ._internal._analyser import Analyser
@@ -39,7 +39,7 @@ class CommandManager:
     __analysers: WeakKeyDictionary[Alconna, Analyser]
     __argv: WeakKeyDictionary[Alconna, Argv]
     __abandons: list[Alconna]
-    __shortcuts: dict[str, dict[str, InnerShortcutArgs]]
+    __shortcuts: dict[str, tuple[dict[str, InnerShortcutArgs], dict[str, InnerShortcutArgs]]]
 
     def __init__(self):
         self.cache_path = f"{__file__.replace('manager.py', '')}manager_cache.db"
@@ -171,7 +171,7 @@ class CommandManager:
         command._hash = command._calc_hash()
         argv.namespace = command.namespace_config
         argv.separators = command.separators
-        argv.compile(command.meta)
+        argv.__post_init__(command.meta)
         argv.param_ids.clear()
         analyser.compile(argv.param_ids)
         self.__argv[command] = argv
@@ -201,22 +201,30 @@ class CommandManager:
         """
         namespace, name = self._command_part(target.path)
         argv = self.resolve(target)
-        _shortcut = self.__shortcuts.setdefault(f"{namespace}.{name}", {})
+        _shortcut = self.__shortcuts.setdefault(f"{namespace}.{name}", ({}, {}))
+        humanize = source.pop("humanized", None)
         if source.get("prefix", False) and target.prefixes:
+            prefixes = []
             out = []
             for prefix in target.prefixes:
                 if not isinstance(prefix, str):
                     continue
-                _shortcut[f"{re.escape(prefix)}{key}"] = InnerShortcutArgs(
+                prefixes.append(prefix)
+                _shortcut[1][f"{re.escape(prefix)}{key}"] = InnerShortcutArgs(
                     **{**source, "command": argv.converter(prefix + source.get("command", str(target.command)))}
                 )
                 out.append(
                     lang.require("shortcut", "add_success").format(shortcut=f"{prefix}{key}", target=target.path)
                 )
+            _shortcut[0][humanize or key] = InnerShortcutArgs(
+                **{**source, "command": argv.converter(source.get("command", str(target.command))), "prefixes": prefixes}
+            )
+            target.formatter.update_shortcut(target)
             return "\n".join(out)
-        _shortcut[key] = InnerShortcutArgs(
+        _shortcut[0][humanize or key] = _shortcut[1][key] = InnerShortcutArgs(
             **{**source, "command": argv.converter(source.get("command", str(target.command)))}
         )
+        target.formatter.update_shortcut(target)
         return lang.require("shortcut", "add_success").format(shortcut=key, target=target.path)
 
     def get_shortcut(self, target: Alconna[TDC]) -> dict[str, InnerShortcutArgs]:
@@ -231,7 +239,10 @@ class CommandManager:
         namespace, name = self._command_part(target.path)
         if target not in self.__analysers:
             raise ValueError(lang.require("manager", "undefined_command").format(target=f"{namespace}.{name}"))
-        return self.__shortcuts.get(f"{namespace}.{name}", {})
+        shortcuts = self.__shortcuts.get(f"{namespace}.{name}", {})
+        if not shortcuts:
+            return {}
+        return shortcuts[0]
 
     def find_shortcut(
         self, target: Alconna[TDC], data: list
@@ -250,15 +261,15 @@ class CommandManager:
             raise ValueError(lang.require("manager", "undefined_command").format(target=f"{namespace}.{name}"))
         query: str = data.pop(0)
         while True:
-            if query in _shortcut:
-                return data, _shortcut[query], None
-            for key, args in _shortcut.items():
-                if isinstance(args, InnerShortcutArgs) and args.fuzzy and (mat := re.match(f"^{key}", query)):
+            if query in _shortcut[1]:
+                return data, _shortcut[1][query], None
+            for key, args in _shortcut[1].items():
+                if args.fuzzy and (mat := re.match(f"^{key}", query)):
                     if len(query) > mat.span()[1]:
                         data.insert(0, query[mat.span()[1]:])
                     return data, args, mat
                 elif mat := re.fullmatch(key, query):
-                    return data, _shortcut[key], mat
+                    return data, _shortcut[1][key], mat
             if not data:
                 break
             next_data = data.pop(0)
@@ -276,7 +287,8 @@ class CommandManager:
             raise ValueError(lang.require("manager", "undefined_command").format(target=f"{namespace}.{name}"))
         if key:
             try:
-                del _shortcut[key]
+                _shortcut[0].pop(key, None)
+                del _shortcut[1][key]
                 return lang.require("shortcut", "delete_success").format(shortcut=key, target=target.path)
             except KeyError as e:
                 raise ValueError(
@@ -384,7 +396,7 @@ class CommandManager:
             + "Commands:\n"
             + f"[{', '.join([cmd.path for cmd in self.get_commands()])}]"
             + "\nShortcuts:\n"
-            + "\n".join([f" {k} => {v}" for short in self.__shortcuts.values() for k, v in short.items()])
+            + "\n".join([f" {k} => {v}" for short in self.__shortcuts.values() for k, v in short[0].items()])
             + "\nDisabled Commands:\n"
             + f"[{', '.join(map(lambda x: x.path, self.__abandons))}]"
         )
