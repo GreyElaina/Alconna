@@ -114,9 +114,11 @@ class Header(Generic[TContent, TCompact]):
         compact: bool,
     ):
         mapping = {}
+        to_regex = False
 
         if isinstance(command, str):
             pair = (command, prefixes)
+
             if command.startswith("re:"):
                 _cmd = command[3:]
                 to_regex = True
@@ -128,12 +130,6 @@ class Header(Generic[TContent, TCompact]):
                 return cls(pair, cmd, mapping, compact, re.compile(f"^{_cmd}"))
 
             _cmd_pattern = _cmd
-
-            prf = "|".join(re.escape(h) for h in prefixes)
-            compp = re.compile(f"^(?:{prf}){_cmd_pattern}")
-
-            if to_regex:
-                return cls(pair, re.compile(f"(?:{prf}){_cmd}"), mapping, compact, compp)
         else:
             _cmd = parser(command)
             pair = (_cmd, prefixes)
@@ -143,7 +139,10 @@ class Header(Generic[TContent, TCompact]):
             
             _cmd_pattern = _cmd.pattern
 
-            prf = "|".join(re.escape(h) for h in prefixes)
-            compp = re.compile(f"^(?:{prf}){_cmd_pattern}")
+        prf = "|".join(re.escape(h) for h in prefixes)
+        compp = re.compile(f"^(?:{prf}){_cmd_pattern}")
+
+        if to_regex:
+            return cls(pair, re.compile(f"(?:{prf}){_cmd}"), mapping, compact, compp)
 
         return cls(pair, {f"{h}{_cmd}" for h in prefixes}, mapping, compact, compp)
