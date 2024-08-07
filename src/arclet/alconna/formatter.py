@@ -14,50 +14,18 @@ if TYPE_CHECKING:
     from .core import Alconna
 
 
-def resolve_requires(options: list[Option | Subcommand]):
-    """Resolve the requires of options."""
-    reqs: dict[str, dict | Option | Subcommand] = {}
-
-    def _u(target, source):
-        for k in source:
-            if k not in target or isinstance(target[k], (Option, Subcommand)):
-                target.update(source)
-                break
-            _u(target[k], source[k])
-
-    for opt in options:
-        if not opt.requires:
-            # reqs.setdefault(opt.name, opt)
-            [reqs.setdefault(i, opt) for i in opt.aliases] if isinstance(opt, Option) else None
-            reqs.setdefault(opt.name, resolve_requires(opt.options)) if isinstance(opt, Subcommand) else None
-        else:
-            _reqs = _cache = {}
-            for req in opt.requires:
-                if not _reqs:
-                    _reqs[req] = {}
-                    _cache = _reqs[req]
-                else:
-                    _cache[req] = {}
-                    _cache = _cache[req]
-            # _cache[opt.name] = opt  # type: ignore
-            [_cache.setdefault(i, opt) for i in opt.aliases] if isinstance(opt, Option) else None  # type: ignore
-            _cache.setdefault(opt.name, resolve_requires(opt.options)) if isinstance(opt, Subcommand) else None
-            _u(reqs, _reqs)
-    return reqs
-
-
-def ensure_node(targets: list[str], options: list[Option | Subcommand]):
-    if not targets:
+def resolve(parts: list[str], options: list[Option | Subcommand]):
+    if not parts:
         return None
-    pf = targets.pop(0)
+    pf = parts.pop(0)
     for opt in options:
         if isinstance(opt, Option) and pf in opt.aliases:
             return opt
         if isinstance(opt, Subcommand) and pf == opt.name:
-            if not targets:
+            if not parts:
                 return opt
-            return sub if (sub := ensure_node(targets, opt.options)) else opt
-    return ensure_node(targets, options)
+            return sub if (sub := resolve(parts, opt.options)) else opt
+    return resolve(parts, options)
 
 
 class TraceHead(TypedDict):
@@ -131,36 +99,11 @@ class TextFormatter:
         def _handle(trace: Trace):
             if not parts or parts == [""]:
                 return self.format(trace)
-            _cache = resolve_requires(trace.body)
-            _parts = []
-            for text in parts:
-                if isinstance(_cache, dict) and text in _cache:
-                    _cache = _cache[text]
-                    _parts.append(text)
-            if not _parts:
-                return self.format(trace)
-            if isinstance(_cache, dict):
-                if ensure := ensure_node(_parts, trace.body):
-                    _cache = ensure
-                else:
-                    _opts, _visited = [], set()
-                    for k, i in _cache.items():
-                        if isinstance(i, dict):
-                            _opts.append(Option(k, requires=_parts))
-                        elif i not in _visited:
-                            _opts.append(i)
-                            _visited.add(i)
-                    return self.format(
-                        Trace({"name": _parts[-1], 'description': _parts[-1], 'example': None, 'usage': None}, Args(), trace.separators, _opts, {})  # noqa: E501
-                    )
-            if isinstance(_cache, Option):
-                return self.format(
-                    Trace({"name": "│".join(_cache.aliases), "description": _cache.help_text, 'example': None, 'usage': None}, _cache.args, _cache.separators, [], {})  # noqa: E501
-                )
-            if isinstance(_cache, Subcommand):
-                return self.format(
-                    Trace({"name": "│".join(_cache.aliases), "description": _cache.help_text, 'example': None, 'usage': None}, _cache.args, _cache.separators, _cache.options, {})  # noqa: E501
-                )
+            end = resolve(parts, trace.body)
+            if isinstance(end, Option):
+                return self.format(Trace({"name": "│".join(end.aliases), "description": end.help_text, 'example': None, 'usage': None}, end.args, end.separators, [], {}))  # noqa: E501
+            if isinstance(end, Subcommand):
+                return self.format(Trace({"name": "│".join(end.aliases), "description": end.help_text, 'example': None, 'usage': None}, end.args, end.separators, end.options, {}))  # noqa: E501
             return self.format(trace)
 
         return "\n".join([_handle(v) for v in self.data.values()])
@@ -241,12 +184,15 @@ class TextFormatter:
 
     def opt(self, node: Option) -> str:
         """对单个选项的描述"""
-        alias_text = " ".join(node.requires) + (" " if node.requires else "") + "│".join(node.aliases)
-        return f"* {node.help_text}\n" f"  {alias_text}{node.separators[0]}{self.parameters(node.args)}\n"
+        alias_text = "|".join(node.aliases)
+        return (
+            f"* {node.help_text}\n"
+            f"  {alias_text}{node.separators[0]}{self.parameters(node.args)}\n"
+        )
 
     def sub(self, node: Subcommand) -> str:
         """对单个子命令的描述"""
-        alias_text = " ".join(node.requires) + (" " if node.requires else "") + "│".join(node.aliases)
+        alias_text = "│".join(node.aliases)
         opt_string = "".join(
             [self.opt(opt).replace("\n", "\n  ").replace("# ", "* ") for opt in node.options if isinstance(opt, Option)]
         )
@@ -284,10 +230,11 @@ class TextFormatter:
             if isinstance(short, InnerShortcutArgs):
                 _key = key + (" ...args" if short.fuzzy else "")
                 prefixes = f"[{'│'.join(short.prefixes)}]" if short.prefixes else ""
-                result.append(f"'{prefixes}{_key}' => {prefixes}{short.command} {' '.join(map(str, short.args))}")
+                result.append(f"'{prefixes}{_key}' => {prefixes}{short.command} {' '.join(short.args)}")
             else:
                 result.append(f"'{key}' => {short.origin!r}")
         return f"{lang.require('format', 'shortcuts')}:\n" + "\n".join(result)
+
 
 
 __all__ = ["TextFormatter", "Trace", "TraceHead"]

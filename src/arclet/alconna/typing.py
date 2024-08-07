@@ -1,27 +1,28 @@
 """Alconna 参数相关"""
 from __future__ import annotations
 
-import re
 import inspect
+import re
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import (
     Any,
-    cast,
+    Callable,
     Dict,
     Iterator,
     List,
     Literal,
     Protocol,
-    Tuple,
+    Type,
     TypedDict,
     TypeVar,
     Union,
+    cast,
     final,
-    runtime_checkable, Type, Callable,
+    runtime_checkable,
 )
-from typing_extensions import NotRequired, TypeAlias
 
 from nepattern import BasePattern, MatchMode, parser
+from typing_extensions import NotRequired, TypeAlias
 
 TPrefixes = List[str]
 DataUnit = TypeVar("DataUnit", covariant=True)

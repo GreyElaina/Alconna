@@ -24,12 +24,6 @@ class Argv(Generic[TDC]):
     separators: tuple[str, ...] = field(default=(" ",))
     """命令分隔符"""
 
-    preprocessors: dict[type, Callable[..., Any]] = field(default_factory=dict)
-    """命令元素的预处理器"""
-    filter_out: list[type] = field(default_factory=list)
-    """需要过滤掉的命令元素"""
-    checker: Callable[[Any], bool] | None = field(default=None)
-    """检查传入命令"""
     param_ids: set[str] = field(default_factory=set)
     """节点名集合"""
 
@@ -58,25 +52,19 @@ class Argv(Generic[TDC]):
     """备份的原始数据"""
     raw_data: list[str | Any] = field(init=False)
     """原始数据"""
-    token: int = field(init=False)
-    """命令的token"""
     origin: TDC = field(init=False)
     """原始命令"""
     context: dict[str, Any] = field(init=False, default_factory=dict)
     special: dict[str, str] = field(init=False, default_factory=dict)
     completion_names: set[str] = field(init=False, default_factory=set)
     _sep: tuple[str, ...] | None = field(init=False)
-
     _cache: ClassVar[dict[type, dict[str, Any]]] = {}
 
     def __post_init__(self, meta: CommandMeta):
         self.reset()
         self.compile(meta)
         if __cache := self.__class__._cache.get(self.__class__, {}):
-            self.preprocessors.update(__cache.get("preprocessors") or {})
-            self.filter_out.extend(__cache.get("filter_out") or [])
             self.to_text = __cache.get("to_text") or self.to_text
-            self.checker = __cache.get("checker") or self.checker
             self.converter = __cache.get("converter") or self.converter
 
     def compile(self, meta: CommandMeta):
@@ -84,7 +72,6 @@ class Argv(Generic[TDC]):
         self.fuzzy_threshold = meta.fuzzy_threshold
         self.to_text = self.namespace.to_text
         self.converter = self.namespace.converter or self.converter  # type: ignore
-        self.message_cache = self.namespace.enable_message_cache
         self.filter_crlf = not meta.keep_crlf
         self.context_style = meta.context_style
         self.special = {}
@@ -101,15 +88,10 @@ class Argv(Generic[TDC]):
         self.ndata = 0
         self.bak_data = []
         self.raw_data = []
-        self.token = 0
         self.origin = "None"  # type: ignore
         self._sep = None
+        self._next = None
         self.current_node = None
-
-    @staticmethod
-    def generate_token(data: list) -> int:
-        """命令的`token`的生成函数"""
-        return hash(repr(data))
 
     @property
     def done(self) -> bool:
@@ -126,23 +108,12 @@ class Argv(Generic[TDC]):
             Self: 自身
         """
         self.reset()
-        if self.checker and not self.checker(data):
-            if not self.converter:
-                raise TypeError(data)
-            try:
-                data = self.converter(data)  # type: ignore
-            except Exception as e:
-                raise TypeError(data) from e
         self.origin = data
         if data.__class__ is str:
             data = [data]  # type: ignore
         i = 0
         raw_data = self.raw_data
         for unit in data:
-            if (utype := unit.__class__) in self.filter_out:
-                continue
-            if (proc := self.preprocessors.get(utype)) and (res := proc(unit)):
-                unit = res
             if (text := self.to_text(unit)) is None:
                 raw_data.append(unit)
             elif not (res := text.strip()):
@@ -154,8 +125,6 @@ class Argv(Generic[TDC]):
             raise NullMessage(lang.require("argv", "null_message").format(target=data))
         self.ndata = i
         self.bak_data = raw_data.copy()
-        if self.message_cache:
-            self.token = self.generate_token(raw_data)
         return self
 
     def addon(self, data: Iterable[str | Any], merge_str: bool = True) -> Self:
@@ -181,8 +150,6 @@ class Argv(Generic[TDC]):
                 self.raw_data.append(d)
                 self.ndata += 1
         self.bak_data = self.raw_data.copy()
-        if self.message_cache:
-            self.token = self.generate_token(self.raw_data)
         return self
 
     def next(self, separate: tuple[str, ...] | None = None, move: bool = True) -> tuple[str | Any, bool]:

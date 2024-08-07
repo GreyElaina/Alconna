@@ -1,127 +1,24 @@
 # 更新日志
 
-## 1.8.23
-
-### 改进
-
-- `Option` 名字设置成 `--` 时不会去除前缀
-
-### 修复
-
-- `Arg` 等类型参数的构造函数中的类型修复
-
-## 1.8.22
-
-### 修复
-
-- `MultiVar` 的 optional 现在会生效了
-
-## 1.8.21
-
-### 改进
-
-- `Arparma.source` 现在返回的是对应的 `Alconna` 对象
-
-## 1.8.20
-
-### 新增
-
-- 增加一个特殊类型 `StrMulti`, 用于匹配多个字符串, 并将结果通过 `str.join` 合并:
-```python
-from arclet.alconna import Alconna, Args, Option, StrMulti
-
-alc = Alconna(
-    "music", Args["song_name", StrMulti],
-    Option("--artist", Args["artist_name", StrMulti])
-)
-
-res = alc.parse("music hello world --artist adele")
-# {'song_name': 'hello world', 'artist_name': 'adele'}
-```
-
-## 1.8.19
-
-### 修复
-
-- `shortcut` 的 wrapper 现在兼容 1.8.18 前的写法（无 context 参数）
-- `shortcut` 在 `fuzzy` 为 False 时的表现
-
-## 1.8.18
-
-### 改进
-
-- `shortcut` 的 wrapper 现在需要 `context` 参数
-- `command_manager.update` 现在会清除先前的命令缓存
-
-### 修复
-
-- 修复传入参数为其他`逻辑值为 False`时参数无法识别的问题
-
-## 1.8.17
-
-### 修复
-
-- 更改 `namespace` 会覆盖先前已挂载的命名空间配置的问题
-
-## 1.8.16
-
-### 修复
-
-- 更改 `Alconna` 在 manager 中的索引形式以避免 `weakref.ref` 的错误行为
-
-## 1.8.15
-
-### 改进
-
-- `shortcut` 的 key 支持正则表达式对象 (`re.Pattern[str]`)
-
-## 1.8.14
-
-### 修复
-
-- 修复 `shortcut` 错误处理非字符串参数的问题
-
-## 1.8.13
-
-### 改进
-
-- `AllParam` 现在不会将剩余字符串参数进行分割
-
-## 1.8.12
-
-### 改进
-
-- 升级 `Tarina` 至 0.5.0 以更新 i18n 文件
-
-## 1.8.11
-
-### 改进
-
-- 快捷指令处理数据时会尝试把带分隔符的字符串用引号包裹
-
-### 修复
-
-- 修复 `Bracket Header` 的正则表达式丢失问题
-
-## 1.8.10
+## Alconna 1.8.10
 
 ### 改进
 
 - 适配 `NEPattern` 0.7.0
 
-## 1.8.9
+## Alconna 1.8.9
 
 ### 修复
 
 - 修复传入命令首个元素非字符串时能错误触发快捷指令的问题
 
-## 1.8.8
+## Alconna 1.8.8
 
 ### 修复
 
 - 修复子命令在自身名称解析失败时其结果被错误存储的问题
 
-## 1.8.7
+## Alconna 1.8.7
 
 ### 改进
 
@@ -131,7 +28,7 @@ res = alc.parse("music hello world --artist adele")
 
 - 修复 manager 更新命令时未使用 `Argv` 的 cache 问题
 
-## 1.8.6
+## Alconna 1.8.6
 
 ### 改进
 
@@ -150,13 +47,13 @@ res = alc.parse("music hello world --artist adele")
 
 - `CommandMeta` 新增属性 `hide_shortcut`, 用于在帮助信息里隐藏命令的快捷指令
 
-## 1.8.5
+## Alconna 1.8.5
 
 ### 修复
 
 - 修复 `Alconna` 的 aliases (继承自subcommand的) 错误
 
-## 1.8.4
+## Alconna 1.8.4
 
 ### 新增
 
@@ -173,19 +70,19 @@ res = alc.parse("music hello world --artist adele")
     ```
 
 
-## 1.8.3
+## Alconna 1.8.3
 
 ### 修复
 
 - 修复 `shortcut.wrapper` 的处理逻辑
 
-## 1.8.2
+## Alconna 1.8.2
 
 ### 修复
 
 - 修复 `manager.get_shortcuts` 的错误
 
-## 1.8.1
+## Alconna 1.8.1
 
 ### 破坏性改动
 
@@ -219,7 +116,7 @@ res = alc.parse("music hello world --artist adele")
 
 - 命令插值的结果现在受类型约束
 
-## 1.8.0
+## Alconna 1.8.0
 
 **此版本为长期支持版本 (LTS)，同时为 v1.x 与 v2.0 之间的过渡版本**
 
@@ -278,13 +175,13 @@ res = alc.parse("music hello world --artist adele")
 
 - 修复类型提示错误
 
-## 1.7.44
+## Alconna 1.7.44
 
 ### 修复
 
 - 修复 `shortcut list` 的错误
 
-## 1.7.43
+## Alconna 1.7.43
 
 ### 改进
 - 允许快捷指令的关键词传入带有分隔符的命令
@@ -292,7 +189,7 @@ res = alc.parse("music hello world --artist adele")
 ### 修复
 - 修复快捷指令使用 `_` 时的异常错误
 
-## 1.7.42
+## Alconna 1.7.42
 
 ### 改进
 - 设置了 completion 的 Arg 在输出文本中会显示其名字
@@ -300,14 +197,14 @@ res = alc.parse("music hello world --artist adele")
 ### 修复
 - 修复 `Alconna.__call__` 接受 sys.argv[1:] 时没有处理引号包裹的参数的 bug
 
-## 1.7.41
+## Alconna 1.7.41
 
 ### 改进
 
 - `Args` 现在可以设置多个 MultiVar 参数
 - 可以通过 `config.remainder` 配置字符来设置多个多参数之间的分隔符
 
-## 1.7.40
+## Alconna 1.7.40
 
 ### 改进
 
@@ -317,45 +214,45 @@ res = alc.parse("music hello world --artist adele")
 
 - 修复快捷指令存在意外匹配的问题
 
-## 1.7.39
+## Alconna 1.7.39
 
 ### 修复
 
 - 修复 `Formatter` 未能正确遍历节点的 bug
 
-## 1.7.38
+## Alconna 1.7.38
 
 ### 修复
 
 - 修复 `command_manager.dump`
 - 修复 `CompSession` 在执行过程中受到其他命令解析干扰的问题
 
-## 1.7.37
+## Alconna 1.7.37
 
 ### 改进
 
 - `Alconna.shortcut` 可以用关键字参数传入 `command` 与 `args` 了
 - 允许提供参数来额外处理 `shortcut` 的正则匹配结果
 
-## 1.7.36
+## Alconna 1.7.36
 
 ### 改进
 
 - 修改换行处理
 
-## 1.7.35
+## Alconna 1.7.35
 
 ### 改进
 
 - 为 completion 下提示列出的选中符号和未选中符号添加 i18n 支持
 
-## 1.7.34
+## Alconna 1.7.34
 
 ### 修复
 
 - 修复 `Option` 与 `Subcommand` 模糊匹配的文本错误
 
-## 1.7.33
+## Alconna 1.7.33
 
 ### 修复
 

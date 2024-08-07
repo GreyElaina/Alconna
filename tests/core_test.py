@@ -280,30 +280,11 @@ def test_alconna_synthesise():
 
 
 def test_simple_override():
-    alc11 = Alconna("core11") + Option("foo", Args["bar", str]) + Option("foo")
+    alc11 = Alconna("core11") + Option("foo", Args["bar", str]) + Option("bar", dest="foo")
     res = alc11.parse("core11 foo abc")
-    res1 = alc11.parse("core11 foo")
-    assert res.matched is True
-    assert res1.matched is True
-
-
-def test_requires():
-    alc12 = Alconna(
-        "core12",
-        Args["target", int],
-        Option("user perm set", Args["foo", str], help_text="set user permission"),
-        Option("user perm del", Args["foo", str], help_text="del user permission"),
-        Option("group perm set", Args["foo", str], help_text="set group permission"),
-        Option("group perm del", Args["foo", str], help_text="del group permission"),
-        Option("test"),
-    )
-
-    assert alc12.parse("core12 123 user perm set 123").find("user_perm_set") is True
-    assert alc12.parse("core12 123 user perm del 123").find("user_perm_del") is True
-    assert alc12.parse("core12 123 group perm set 123").find("group_perm_set") is True
-    assert alc12.parse("core12 123 group perm del 123 test").find("group_perm_del") is True
-    print("\n------------------------")
-    print(alc12.get_help())
+    res1 = alc11.parse("core11 bar")
+    assert res.query("foo") is not None
+    assert res1.query("foo") is not None
 
 
 def test_wildcard():
@@ -365,6 +346,13 @@ def test_fuzzy():
         res2 = alc15_1.parse("@core15_1")
         assert res2.matched is False
         assert cap["output"] == '无法解析 "@core15_1"。您想要输入的是不是 "/core15_1" ?'
+
+    alc15_3 = Alconna("core15_3", Option("rank", compact=True), meta=CommandMeta(fuzzy_match=True))
+    with output_manager.capture("core15_3") as cap:
+        output_manager.set_action(lambda x: x, "core15_3")
+        res6 = alc15_3.parse("core15_3 runk")
+        assert res6.matched is False
+        assert cap["output"] == '无法解析 "runk"。您想要输入的是不是 "rank" ?'
 
     alc15_3 = Alconna("core15_3", Option("rank", compact=True), meta=CommandMeta(fuzzy_match=True))
     with output_manager.capture("core15_3") as cap:
@@ -463,9 +451,6 @@ Unknown
     alc16_8 = Alconna("core16_8", Args["bar", str])
     res11 = alc16_8.parse("core16_8 1234")
     assert res11.bar == "1234"
-    alc16_8.parse("core16_8 --shortcut test _")
-    res12 = alc16_8.parse("test")
-    assert res12.bar == "1234"
 
     alc16_9 = Alconna("core16_9", Args["bar", str])
     alc16_9.shortcut("test(.+)?", command="core16_9 {0}")
@@ -476,11 +461,6 @@ Unknown
     alc16_10.shortcut("/qux", {"command": "core16_10"})
 
     assert alc16_10.parse(['/qux "abc def.zip"', 123]).bar == "abc def.zip"
-
-    alc16_11 = Alconna("core16_11", Args["bar", str])
-    pat = re.compile("test", re.I)
-    alc16_11.shortcut(pat, {"command": "core16_11"})
-    assert alc16_11.parse("TeSt 123").bar == "123"
 
     def wrapper1(slot, content, context):
         if slot == 0:
@@ -688,18 +668,18 @@ def test_call():
     from dataclasses import dataclass
 
     alc22 = Alconna("core22", Args["foo", int], Args["bar", str])
-    alc22("core22 123 abc")
 
-    @alc22.bind(False)
+    @alc22.bind()
     def cb(foo: int, bar: str):
         print("")
         print("core22: ")
         print(foo, bar)
         return 2 * foo
 
-    assert cb.result == 246
+    alc22("core22 123 abc")
+    assert alc22.exec_result["cb"] == 246
     alc22.parse("core22 321 abc")
-    assert cb.result == 642
+    assert alc22.exec_result["cb"] == 642
 
     alc22_1 = Alconna("core22_1", Args["name", str])
 
@@ -771,17 +751,17 @@ def test_action():
         Option("--flag|-F", Args["flag", str], action=append, compact=True),
         Option("-v", action=count),
         Option("-x|--xyz", action=count),
-        Option("--q", action=count, requires=["foo", "bar"]),
+        Option("--q", action=count),
     )
     res = alc24_2.parse(
-        "core24_2 -A --a -vvv -x -x --xyzxyz " "-Fabc -Fdef --flag xyz --i 4 --i 5 " "foo bar --q foo bar --qq"
+        "core24_2 -A --a -vvv -x -x --xyzxyz " "-Fabc -Fdef --flag xyz --i 4 --i 5 " "--q --qq"
     )
     assert res.query[int]("i.foo") == 5
     assert res.query[List[int]]("a.value") == [1, 1]
     assert res.query[List[str]]("flag.flag") == ["abc", "def", "xyz"]
     assert res.query[int]("v.value") == 3
     assert res.query[int]("xyz.value") == 4
-    assert res.query[int]("foo_bar_q.value") == 3
+    assert res.query[int]("q.value") == 3
 
     alc24_3 = Alconna("core24_3", Option("-t", default=False, action=append_value(True)))
     assert alc24_3.parse("core24_3 -t -t -t").query("t.value") == [True, True, True]

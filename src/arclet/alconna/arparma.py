@@ -103,7 +103,6 @@ class Arparma(Generic[TDC]):
         error_info (type[BaseException] | BaseException | str): 错误信息
         error_data (list[str | Any]): 错误数据
         main_args (dict[str, Any]): 主参数匹配结果
-        other_args (dict[str, Any]): 其他参数匹配结果
         options (dict[str, OptionResult]): 选项匹配结果
         subcommands (dict[str, SubcommandResult]): 子命令匹配结果
     """
@@ -145,7 +144,6 @@ class Arparma(Generic[TDC]):
         self.error_info = error_info
         self.error_data = error_data or []
         self.main_args = main_args or {}
-        self.other_args = {}
         self.options = options or {}
         self.subcommands = subcommands or {}
         self.context = ctx or {}
@@ -157,7 +155,7 @@ class Arparma(Generic[TDC]):
         self.context.clear()
         self.error_data.clear()
         self.main_args.clear()
-        self.other_args.clear()
+        #self.other_args.clear()
         self.options.clear()
         self.subcommands.clear()
         ks = list(self.__dict__.keys())
@@ -192,37 +190,29 @@ class Arparma(Generic[TDC]):
     @property
     def all_matched_args(self) -> dict[str, Any]:
         """返回 Alconna 中所有 Args 解析到的值"""
-        return {**self.main_args, **self.other_args}
+        other_args = {}
 
-    @property
-    def token(self) -> int:
-        """返回命令的 Token"""
-        from .manager import command_manager
+        def _unpack_opts(_data):
+            for _v in _data.values():
+                other_args.update(_v.args)
 
-        return command_manager.get_token(self)
+        def _unpack_subs(_data):
+            for _v in _data.values():
+                other_args.update(_v.args)
+                if _v.options:
+                    _unpack_opts(_v.options)
+                if _v.subcommands:
+                    _unpack_subs(_v.subcommands)
+
+        _unpack_opts(self.options)
+        _unpack_subs(self.subcommands)
+        return {**self.main_args, **other_args}
 
     @property
     def source(self):
         from .manager import command_manager
 
         return command_manager._resolve(self._id)
-
-    def _unpack_opts(self, _data):
-        for _v in _data.values():
-            self.other_args = {**self.other_args, **_v.args}
-
-    def _unpack_subs(self, _data):
-        for _v in _data.values():
-            self.other_args = {**self.other_args, **_v.args}
-            if _v.options:
-                self._unpack_opts(_v.options)
-            if _v.subcommands:
-                self._unpack_subs(_v.subcommands)
-
-    def unpack(self) -> None:
-        """处理 `Arparma` 中的数据"""
-        self._unpack_opts(self.options)
-        self._unpack_subs(self.subcommands)
 
     @staticmethod
     def behave_cancel():
@@ -244,8 +234,6 @@ class Arparma(Generic[TDC]):
         """
         if not behaviors:
             return self
-        for b in behaviors:
-            b.before_operate(self)
         for b in behaviors:
             try:
                 b.operate(self)
@@ -299,18 +287,21 @@ class Arparma(Generic[TDC]):
 
     def fail(self, exc: type[Exception] | Exception) -> Self:
         """生成一个失败的 `Arparma`"""
-        return Arparma(self._id, self.origin, False, self.header_match, error_info=exc)  # type: ignore
+        return Arparma(self.source, self.origin, False, self.header_match, error_info=exc)  # type: ignore
 
     def __require__(self, parts: list[str]) -> tuple[dict[str, Any] | OptionResult | SubcommandResult | None, str]:
         """如果能够返回, 除开基本信息, 一定返回该path所在的dict"""
+        all_args = self.all_matched_args
         if len(parts) == 1:
             part = parts[0]
-            if part in {"options", "subcommands", "main_args", "other_args", "context"}:
+            if part in {"options", "subcommands", "main_args", "context"}:
                 return getattr(self, part, {}), ""
-            for src in (self.main_args, self.other_args, self.options, self.subcommands, self.context):
+            for src in (self.main_args, all_args, self.options, self.subcommands, self.context):
                 if part in src:
                     return src, part
-            return (self.all_matched_args, "") if part == "args" else (None, part)
+            if part == "all_args":
+                return all_args, ""
+            return (all_args, "") if part == "args" else (None, part)
         prefix = parts.pop(0)  # parts[0]
         if prefix in {"options", "subcommands"} and prefix in self.components:
             raise RuntimeError(lang.require("arparma", "ambiguous_name").format(target=prefix))
@@ -318,8 +309,8 @@ class Arparma(Generic[TDC]):
             return _handle_opt(prefix, parts, self.options)
         if prefix == "subcommands" or prefix in self.subcommands:
             return _handle_sub(prefix, parts, self.subcommands)
-        prefix = prefix.replace("$main", "main_args").replace("$other", "other_args")
-        if prefix in {"main_args", "other_args"}:
+        prefix = prefix.replace("$main", "main_args").replace("$all", "all_matched_args")
+        if prefix in {"main_args", "all_matched_args"}:
             return getattr(self, prefix, {}), parts.pop(0)
         path = ".".join([prefix] + parts)
         if path in self.context:
@@ -388,7 +379,6 @@ class Arparma(Generic[TDC]):
                 "options": self.options,
                 "subcommands": self.subcommands,
                 "main_args": self.main_args,
-                "other_args": self.other_args,
             }
             return ", ".join([f"{a}={v}" for a, v in attrs.items() if v])
 
@@ -401,29 +391,8 @@ class ArparmaBehavior(metaclass=ABCMeta):
         requires (list[ArparmaBehavior]): 该行为器所依赖的行为器
     """
 
-    record: dict[int, dict[str, tuple[Any, Any]]] = field(default_factory=dict, init=False, repr=False, hash=False)
     requires: list[ArparmaBehavior] = field(init=False, hash=False, repr=False)
 
-    def before_operate(self, interface: Arparma):
-        """在操作前调用, 用于准备数据"""
-        if not self.record:
-            return
-        if not (_record := self.record.get(interface.token)):
-            return
-        for path, (past, current) in _record.items():
-            source, end = interface.__require__(path.split("."))
-            if source is None:
-                continue
-            if isinstance(source, dict):
-                if past != Empty:
-                    source[end] = past
-                elif source.get(end, Empty) != current:
-                    source.pop(end)
-            elif past != Empty:
-                setattr(source, end, past)
-            elif getattr(source, end, Empty) != current:
-                delattr(source, end)
-        _record.clear()
 
     @abstractmethod
     def operate(self, interface: Arparma):
@@ -439,23 +408,20 @@ class ArparmaBehavior(metaclass=ABCMeta):
             value (Any): 要更新的值
         """
 
-        def _update(tkn, src, pth, ep, val):
-            _record = self.record.setdefault(tkn, {})
+        def _update(src, ep, val):
             if isinstance(src, dict):
-                _record[pth] = (src.get(ep, Empty), val)
                 src[ep] = val
             else:
-                _record[pth] = (getattr(src, ep, Empty), val)
                 setattr(src, ep, val)
 
         source, end = interface.__require__(path.split("."))
         if source is None:
             return
         if end:
-            _update(interface.token, source, path, end, value)
+            _update(source, end, value)
         elif isinstance(value, dict):
             for k, v in value.items():
-                _update(interface.token, source, f"{path}.{k}", k, v)
+                _update(source, k, v)
 
 
 @lru_cache(4096)

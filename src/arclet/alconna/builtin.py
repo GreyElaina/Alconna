@@ -5,8 +5,8 @@ from typing import Any, Callable, overload
 
 from .arparma import Arparma, ArparmaBehavior
 from .exceptions import BehaveCancelled
-__all__ = ["set_default"]
 
+__all__ = ["set_default"]
 
 class _MISSING_TYPE:
     ...

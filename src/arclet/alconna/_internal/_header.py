@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import re
-from inspect import isclass
-from typing import TYPE_CHECKING, Any, Callable, TypeVar, Generic
+from typing import TypeVar, Generic
 
-from nepattern import BasePattern, MatchMode, UnionPattern, all_patterns, parser
+from nepattern import BasePattern, MatchMode, all_patterns, parser
 from nepattern.util import TPattern
 from tarina import lang
 
@@ -92,18 +91,21 @@ class Header(Generic[TContent, TCompact]):
 
     def __repr__(self):
         self.origin: tuple[str, list[str]]
+
         if isinstance(self.content, set):
             if not self.origin[1]:
                 return self.origin[0]
+            
             if self.origin[0]:
                 return f"[{'│'.join(self.origin[1])}]{self.origin[0]}" if len(self.content) > 1 else f"{self.content.copy().pop()}"  # noqa: E501
+            
             return '│'.join(self.origin[1])
+
         if isinstance(self.content, TPattern):  # type: ignore
             if not self.origin[1]:
                 return self.origin[0]
             return f"[{'│'.join(self.origin[1])}]{self.origin[0]}"
-        if isinstance(self.content, list):
-            return "│".join(map(str, self.content))
+
         return str(self.content)
 
     @classmethod

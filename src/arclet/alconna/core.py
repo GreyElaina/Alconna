@@ -2,28 +2,31 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field, is_dataclass
-from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Generic, Literal, Sequence, TypeVar, cast, overload
-
-from nepattern import TPattern
-from typing_extensions import Self
 from weakref import WeakSet
 
 from tarina import init_spec, lang
+from typing_extensions import Self
 
 from ._internal._analyser import Analyser, TCompile
 from .args import Arg, Args
 from .arparma import Arparma, ArparmaBehavior, requirement_handler
 from .base import Completion, Help, Option, Shortcut, Subcommand
 from .config import Namespace, config
-from .exceptions import ExecuteFailed, NullMessage
+from .exceptions import NullMessage
 from .formatter import TextFormatter
 from .manager import ShortcutArgs, command_manager
-from .typing import TDC, CommandMeta, DataCollection, InnerShortcutArgs, ShortcutRegWrapper, TPrefixes
+from .typing import (
+    TDC,
+    CommandMeta,
+    DataCollection,
+    ShortcutRegWrapper,
+    TPrefixes,
+)
 
 T = TypeVar("T")
+TCallable = TypeVar("TCallable", bound=Callable[..., Any])
 TDC1 = TypeVar("TDC1", bound=DataCollection[Any])
 
 
@@ -50,34 +53,6 @@ def add_builtin_options(options: list[Option | Subcommand], ns: Namespace) -> No
         )
     if "completion" not in ns.disable_builtin_options:
         options.append(Completion("|".join(ns.builtin_option_name["completion"]), help_text=lang.require("builtin", "option_completion")))  # noqa: E501
-
-
-@dataclass(init=True, unsafe_hash=True)
-class ArparmaExecutor(Generic[T]):
-    """Arparma 执行器
-
-    Attributes:
-        target(Callable[..., T]): 目标函数
-    """
-
-    target: Callable[..., T]
-    binding: Callable[..., list[Arparma]] = field(default=lambda: [], repr=False)
-
-    def __call__(self, *args, **kwargs):
-        return self.target(*args, **kwargs)
-
-    @property
-    def result(self) -> T:
-        """执行结果"""
-        if not self.binding:
-            raise ExecuteFailed(None)
-        arps = self.binding()
-        if not arps or not arps[0].matched:
-            raise ExecuteFailed("Unmatched")
-        try:
-            return arps[0].call(self.target)
-        except Exception as e:
-            raise ExecuteFailed(e) from e
 
 
 class Alconna(Subcommand, Generic[TDC]):
@@ -171,7 +146,7 @@ class Alconna(Subcommand, Generic[TDC]):
         for behavior in behaviors or []:
             self.behaviors.extend(requirement_handler(behavior))
         command_manager.register(self)
-        self._executors: dict[ArparmaExecutor, Any] = {}
+        self._executors: dict[Callable[..., Any], Any] = {}
         self.union: "WeakSet[Alconna]" = WeakSet()
 
     @property
@@ -211,11 +186,8 @@ class Alconna(Subcommand, Generic[TDC]):
         result = []
         shortcuts = command_manager.get_shortcut(self)
         for key, short in shortcuts.items():
-            if isinstance(short, InnerShortcutArgs):
-                prefixes = f"[{'│'.join(short.prefixes)}]" if short.prefixes else ""
-                result.append(prefixes + key + (" ...args" if short.fuzzy else ""))
-            else:
-                result.append(key)
+            prefixes = f"[{'│'.join(short.prefixes)}]" if short.prefixes else ""
+            result.append(prefixes + key + (" ...args" if short.fuzzy else ""))
         return result
 
     def _get_shortcuts(self):
@@ -223,11 +195,11 @@ class Alconna(Subcommand, Generic[TDC]):
         return command_manager.get_shortcut(self)
 
     @overload
-    def shortcut(self, key: str | TPattern, args: ShortcutArgs | None = None) -> str:
+    def shortcut(self, key: str, args: ShortcutArgs | None = None) -> str:
         """操作快捷命令
 
         Args:
-            key (str | re.Pattern[str]): 快捷命令名, 可传入正则表达式
+            key (str): 快捷命令名
             args (ShortcutArgs): 快捷命令参数, 不传入时则尝试使用最近一次使用的命令
 
         Returns:
@@ -241,7 +213,7 @@ class Alconna(Subcommand, Generic[TDC]):
     @overload
     def shortcut(
         self,
-        key: str | TPattern,
+        key: str,
         *,
         command: str | None = None,
         arguments: list[Any] | None = None,
@@ -253,7 +225,7 @@ class Alconna(Subcommand, Generic[TDC]):
         """操作快捷命令
 
         Args:
-            key (str | re.Pattern[str]): 快捷命令名, 可传入正则表达式
+            key (str): 快捷命令名
             command (str): 快捷命令指向的命令
             arguments (list[Any] | None, optional): 快捷命令参数, 默认为 `None`
             fuzzy (bool, optional): 是否允许命令后随参数, 默认为 `True`
@@ -270,11 +242,11 @@ class Alconna(Subcommand, Generic[TDC]):
         ...
 
     @overload
-    def shortcut(self, key: str | TPattern, *, delete: Literal[True]) -> str:
+    def shortcut(self, key: str, *, delete: Literal[True]) -> str:
         """操作快捷命令
 
         Args:
-            key (str | re.Pattern[str]): 快捷命令名, 可传入正则表达式
+            key (str): 快捷命令名
             delete (bool): 是否删除快捷命令
 
         Returns:
@@ -285,7 +257,7 @@ class Alconna(Subcommand, Generic[TDC]):
         """
         ...
 
-    def shortcut(self, key: str | TPattern, args: ShortcutArgs | None = None, delete: bool = False, **kwargs):
+    def shortcut(self, key: str, args: ShortcutArgs | None = None, delete: bool = False, **kwargs):
         try:
             if delete:
                 return command_manager.delete_shortcut(self, key)
@@ -295,17 +267,8 @@ class Alconna(Subcommand, Generic[TDC]):
                 args = cast(ShortcutArgs, kwargs)
             if args is not None:
                 return command_manager.add_shortcut(self, key, args)
-            elif cmd := command_manager.recent_message:
-                alc = command_manager.last_using
-                if alc and alc == self:
-                    return command_manager.add_shortcut(self, key, {"command": cmd})  # type: ignore
-                raise ValueError(
-                    lang.require("shortcut", "recent_command_error").format(
-                        target=self.path, source=getattr(alc, "path", "Unknown")
-                    )
-                )
             else:
-                raise ValueError(lang.require("shortcut", "no_recent_command"))
+                raise ValueError(f"{args} give a empty args")
         except Exception as e:
             if self.meta.raise_exception:
                 raise e
@@ -364,27 +327,21 @@ class Alconna(Subcommand, Generic[TDC]):
             arp = arp.execute(self.behaviors)
             if self._executors:
                 for ext in self._executors:
-                    self._executors[ext] = arp.call(ext.target)
+                    self._executors[ext] = arp.call(ext)
         return arp
 
-    def bind(self, active: bool = True):
-        """绑定命令执行器
+    def bind(self):
+        """绑定命令执行器"""
 
-        Args:
-            active (bool, optional): 该执行器是否由 `Alconna` 主动调用, 默认为 `True`
-        """
-
-        def wrapper(target: Callable[..., T]) -> ArparmaExecutor[T]:
-            ext = ArparmaExecutor(target, lambda: command_manager.get_result(self))
-            if active:
-                self._executors[ext] = None
-            return ext
+        def wrapper(target: TCallable) -> TCallable:
+            self._executors[target] = None
+            return target
 
         return wrapper
 
     @property
     def exec_result(self) -> dict[str, Any]:
-        return {ext.target.__name__: res for ext, res in self._executors.items() if res is not None}
+        return {ext.__name__: res for ext, res in self._executors.items() if res is not None}
 
     def __truediv__(self, other) -> Self:
         return self.reset_namespace(other)
@@ -436,4 +393,4 @@ class Alconna(Subcommand, Generic[TDC]):
         return str(ana.command_header)
 
 
-__all__ = ["Alconna", "ArparmaExecutor"]
+__all__ = ["Alconna"]

@@ -2,10 +2,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Tuple, TypeVar
 from weakref import WeakKeyDictionary
 
-from tarina import is_awaitable
-
 from arclet.alconna import Alconna, Arparma
-from arclet.alconna.core import ArparmaExecutor
+from tarina import is_awaitable
 
 TCall = TypeVar("TCall", bound=Callable)
 

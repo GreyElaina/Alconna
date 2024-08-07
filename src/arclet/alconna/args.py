@@ -5,9 +5,8 @@ import inspect
 import re
 import sys
 from enum import Enum
-from functools import partial
 from typing import Any, Callable, Generic, Iterable, List, Sequence, TypeVar, Union, cast
-from typing_extensions import Self
+from typing_extensions import Self, Unpack
 
 from nepattern import ANY, NONE, AntiPattern, BasePattern, MatchMode, RawStr, UnionPattern, parser
 from tarina import Empty, get_signature, lang
@@ -23,7 +22,6 @@ def safe_dcls_kw(**kwargs):
 
 
 _T = TypeVar("_T")
-
 
 class ArgFlag(str, Enum):
     """标识参数单元的特殊属性"""
@@ -151,15 +149,11 @@ class Arg(Generic[_T]):
 class ArgsMeta(type):
     """`Args` 类的元类"""
 
-    def __getattr__(self, name: str):
-        return type("_S", (), {"__getitem__": partial(self.__class__.__getitem__, self, key=name), "__call__": None})()
-
-    def __getitem__(self, item: Union[Arg, tuple[Arg, ...], str, tuple[Any, ...]], key: str | None = None):
+    def __getitem__(self, item: Union[Arg, tuple[Arg, ...], str, tuple[str, Any], tuple[str, Unpack[tuple[Any, ...]]]]):
         """构造参数集合
 
         Args:
             item (Union[Arg, tuple[Arg, ...], str, Any]): 参数单元或参数单元组或构建参数单元的值
-            key (str, optional): 参数单元的名称. Defaults to None.
 
         Returns:
             Args: 参数集合
@@ -167,10 +161,8 @@ class ArgsMeta(type):
         data: tuple[Arg, ...] | tuple[Any, ...] = item if isinstance(item, tuple) else (item,)
         if isinstance(data[0], Arg):
             return self(*data)
-        return self(Arg(key, *data)) if key else self(Arg(*data))  # type: ignore
 
-
-NULL = {Empty: None, None: Empty}
+        return self(Arg(*cast(Any, data)))
 
 
 class _argument(List[Arg[Any]]):
@@ -211,11 +203,6 @@ class Args(metaclass=ArgsMeta):
 
         >>> Args["name", str]["age", int]
         Args('name': str, 'age': int)
-
-    也可以使用特殊方法 `__getattr__` 来构造参数集合, 例如:
-
-        >>> Args.name[str]
-        Args('name': str)
     """
 
     argument: _argument
@@ -243,7 +230,7 @@ class Args(metaclass=ArgsMeta):
             if anno == inspect.Signature.empty:
                 anno = type(de) if de not in {Empty, None} else ANY
             if param.kind == param.KEYWORD_ONLY:
-                if anno == bool:
+                if anno is bool:
                     anno = KWBool(f"(?:-*no)?-*{name}", MatchMode.REGEX_CONVERT, bool, lambda _, x: not x[0].lstrip("-").startswith('no'))  # noqa: E501
                 anno = KeyWordVar(anno, sep=kw_sep)
             if param.kind == param.VAR_POSITIONAL:

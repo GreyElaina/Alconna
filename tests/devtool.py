@@ -20,7 +20,7 @@ class AnalyseError(Exception):
     """分析时发生错误"""
 
 
-dev_space = Namespace("devtool", enable_message_cache=False)
+dev_space = Namespace("devtool")
 
 
 class _DummyAnalyser(Analyser):
@@ -35,6 +35,7 @@ class _DummyAnalyser(Analyser):
         cls.command = cls._DummyALC()  # type: ignore
         cls.compile_params = {}
         cls.compact_params = []
+        cls.default_sub_result = {}
         return super().__new__(cls)
 
 
@@ -46,7 +47,7 @@ def analyse_args(
     **kwargs
 ):
     meta = CommandMeta(keep_crlf=False, fuzzy_match=False, raise_exception=raise_exception, context_style=context_style)
-    argv: Argv[DataCollection] = Argv(meta, dev_space)
+    argv = Argv(meta, dev_space)
     try:
         argv.enter(kwargs)
         argv.build(["test"] + command)
@@ -69,7 +70,7 @@ def analyse_header(
     **kwargs
 ):
     meta = CommandMeta(keep_crlf=False, fuzzy_match=False, raise_exception=raise_exception, context_style=context_style)
-    argv: Argv[DataCollection] = Argv(meta, dev_space, separators=(sep,))
+    argv = Argv(meta, dev_space, separators=(sep,))
     command_header = Header.generate(command_name, headers, compact=compact)
     try:
         argv.enter(kwargs)
@@ -89,7 +90,7 @@ def analyse_option(
     **kwargs
 ):
     meta = CommandMeta(keep_crlf=False, fuzzy_match=False, raise_exception=raise_exception, context_style=context_style)
-    argv: Argv[DataCollection] = Argv(meta, dev_space)
+    argv = Argv(meta, dev_space)
     _analyser = _DummyAnalyser.__new__(_DummyAnalyser)
     _analyser.reset()
     _analyser.command.separators = (" ",)
@@ -116,7 +117,7 @@ def analyse_subcommand(
     **kwargs
 ):
     meta = CommandMeta(keep_crlf=False, fuzzy_match=False, raise_exception=raise_exception, context_style=context_style)
-    argv: Argv[DataCollection] = Argv(meta, dev_space)
+    argv = Argv(meta, dev_space)
     _analyser = _DummyAnalyser.__new__(_DummyAnalyser)
     _analyser.reset()
     _analyser.command.separators = (" ",)
