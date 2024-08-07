@@ -86,14 +86,27 @@ class Pair(Generic[TP]):
         cmd, mat = self._match(command, rbfn, comp)
         if cmd is None:
             return
+            
         if self.is_prefix_pat and (val := self.prefix.validate(_pf)).success:
             return (_pf, command), (val._value, command), True, self.gd_supplier(mat)
+
         if not isclass(_pf) and _pf == self.prefix or _pf.__class__ == self.prefix:
             return (_pf, command), (_pf, command), True, self.gd_supplier(mat)
 
+
     def __repr__(self):
-        prefix = f"{self.prefix}" if self.is_prefix_pat else self.prefix.__name__ if isinstance(self.prefix, type) else self.prefix.__class__.__name__  # noqa: E501
-        pattern = self.pattern if isinstance(self.pattern, str) else self.pattern.pattern
+        if self.is_prefix_pat:
+            prefix = f"{self.prefix}"
+        elif isinstance(self.prefix, type):
+            prefix = self.prefix.__name__
+        else:
+            prefix = self.prefix.__class__.__name__
+        
+        if isinstance(self.pattern, str):
+            pattern = self.pattern
+        else:
+            pattern = self.pattern.pattern
+        
         return f"({prefix}{pattern!r})"
 
 
