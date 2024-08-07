@@ -23,7 +23,7 @@ from typing_extensions import NotRequired, TypeAlias
 
 from nepattern import BasePattern, MatchMode, parser
 
-TPrefixes = Union[List[Union[str, object]], List[Tuple[object, str]]]
+TPrefixes = List[str]
 DataUnit = TypeVar("DataUnit", covariant=True)
 
 class _ShortcutRegWrapper(Protocol):
