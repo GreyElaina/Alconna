@@ -10,14 +10,14 @@ TCall = TypeVar("TCall", bound=Callable)
 
 @dataclass
 class Commands:
-    executors: WeakKeyDictionary[Alconna, Tuple[ArparmaExecutor, bool]] = field(default_factory=WeakKeyDictionary)
+    executors: WeakKeyDictionary[Alconna, Tuple[Callable, bool]] = field(default_factory=WeakKeyDictionary)
 
     def __post_init__(self):
         Arparma.addition(commander=lambda: self)
 
     def on(self, alc: Alconna, block: bool = True):
         def wrapper(func: TCall) -> TCall:
-            self.executors[alc] = (alc.bind(False)(func), block)
+            self.executors[alc] = (alc.bind()(func), block)
             return func
 
         return wrapper

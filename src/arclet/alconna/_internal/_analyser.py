@@ -362,7 +362,7 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
         try:
             while analyse_param(self, argv) and argv.current_index != argv.ndata:
                 pass
-        except FuzzyMatchSuccess as e:
+        except FuzzyMatchSuccess as e:  # noqa: F841
             output_manager.send(self.command.name, lambda: str(e))  # noqa  # FIXME
             return self.export(argv, True)
         except SpecialOptionTriggered as sot:
