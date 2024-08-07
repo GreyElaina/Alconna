@@ -314,11 +314,14 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
             self.header_result = self.header_handler(self.command_header, argv)
         except InvalidParam as e:
             _next = e.args[1]
+
             if _next.__class__ is not str or not _next:
                 if self.command.meta.raise_exception:
                     raise e
                 return self.export(argv, True, e)
+
             argv.context[SHORTCUT_TRIGGER] = _next
+
             try:
                 rest, short, mat = command_manager.find_shortcut(self.command, [_next] + argv.release())
             except ValueError as exc:
