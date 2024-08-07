@@ -16,9 +16,9 @@ def test_magic_create():
     assert len(arg1_1) == 2
     assert analyse_args(arg1_1, ["0"]) == {"baz": 0, "foo": 1}
     assert analyse_args(arg1_1, [0]) == {"baz": 0, "foo": 1}
-    #arg11: Args = Args["baz", int]
-    #arg11.add("foo", value=int, default=1)
-    #assert len(arg11) == 2
+    arg11: Args = Args["baz", int]
+    arg11.add("foo", value=int, default=1)
+    assert len(arg11) == 2
 
 
 def test_type_convert():
@@ -242,9 +242,9 @@ def test_multi_multi():
     assert analyse_args(arg20_1, ["1 2 -- a b"]) == {"foo": (1, 2), "bar": ("a", "b")}
     assert analyse_args(arg20_1, ["1 2 a b"]) == {"foo": (1, 2), "bar": ("a", "b")}
 
-    # arg20_2 = Args["foo", str]["bar", StrMulti]
-    # assert analyse_args(arg20_2, ["a b"]) == {"foo": "a", "bar": "b"}
-    # assert analyse_args(arg20_2, ["a b c"]) == {"foo": "a", "bar": "b c"}
+    arg20_2 = Args["foo", str]["bar", StrMulti]
+    assert analyse_args(arg20_2, ["a b"]) == {"foo": "a", "bar": "b"}
+    assert analyse_args(arg20_2, ["a b c"]) == {"foo": "a", "bar": "b c"}
 
 def test_contextval():
     arg21 = Args["foo", str]
