@@ -16,6 +16,14 @@ def test_single_args():
     assert node1.args == Args["bar", int]
 
 
+def test_node_requires():
+    node2 = CommandNode("foo", requires=["baz", "qux"])
+    assert node2.dest == "baz_qux_foo"
+    node2_1 = CommandNode("baz qux foo")
+    assert node2_1.name == "foo"
+    assert node2_1.requires == ["baz", "qux"]
+
+
 def test_option_aliases():
     opt = Option("test|T|t")
     assert opt.aliases == {"test", "T", "t"}

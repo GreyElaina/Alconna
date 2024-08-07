@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pprint import pprint
 from dataclasses import dataclass, field
 from typing import Literal, Optional, overload
 from typing_extensions import Self
@@ -13,6 +12,7 @@ from arclet.alconna.action import Action, store, store_true
 class Scope:
     refer: Node
     substance: dict[str, Node] = field(default_factory=dict)
+
 
 
 

@@ -113,7 +113,7 @@ class Arparma(Generic[TDC]):
 
     def __init__(
         self,
-        source: str,
+        _id: int,
         origin: TDC,
         matched: bool = False,
         header_match: HeadResult | None = None,
@@ -126,7 +126,7 @@ class Arparma(Generic[TDC]):
     ):
         """初始化 `Arparma`
         Args:
-            source (str): 命令源
+            _id (int): 命令源
             origin (TDC): 原始数据
             matched (bool, optional): 是否匹配
             header_match (HeadResult | None, optional): 命令头匹配结果
@@ -137,7 +137,7 @@ class Arparma(Generic[TDC]):
             subcommands (dict[str, SubcommandResult] | None, optional): 子命令匹配结果
             ctx (dict[str, Any] | None, optional): 上下文
         """
-        self.source = source
+        self._id = _id
         self.origin = origin
         self.matched = matched
         self.header_match = header_match or HeadResult()
@@ -215,6 +215,29 @@ class Arparma(Generic[TDC]):
 
         return command_manager.get_token(self)
 
+    @property
+    def source(self):
+        from .manager import command_manager
+
+        return command_manager._resolve(self._id)
+
+    def _unpack_opts(self, _data):
+        for _v in _data.values():
+            self.other_args = {**self.other_args, **_v.args}
+
+    def _unpack_subs(self, _data):
+        for _v in _data.values():
+            self.other_args = {**self.other_args, **_v.args}
+            if _v.options:
+                self._unpack_opts(_v.options)
+            if _v.subcommands:
+                self._unpack_subs(_v.subcommands)
+
+    def unpack(self) -> None:
+        """处理 `Arparma` 中的数据"""
+        self._unpack_opts(self.options)
+        self._unpack_subs(self.subcommands)
+
     @staticmethod
     def behave_cancel():
         """取消行为器的后续操作"""
@@ -290,21 +313,19 @@ class Arparma(Generic[TDC]):
 
     def fail(self, exc: type[Exception] | Exception) -> Self:
         """生成一个失败的 `Arparma`"""
-        return Arparma(self.source, self.origin, False, self.header_match, error_info=exc)  # type: ignore
+        return Arparma(self._id, self.origin, False, self.header_match, error_info=exc)  # type: ignore
 
     def __require__(self, parts: list[str]) -> tuple[dict[str, Any] | OptionResult | SubcommandResult | None, str]:
         """如果能够返回, 除开基本信息, 一定返回该path所在的dict"""
         all_args = self.all_matched_args
         if len(parts) == 1:
             part = parts[0]
-            if part in {"options", "subcommands", "main_args", "context"}:
+            if part in {"options", "subcommands", "main_args", "other_args", "context"}:
                 return getattr(self, part, {}), ""
-            for src in (self.main_args, all_args, self.options, self.subcommands, self.context):
+            for src in (self.main_args, self.other_args, self.options, self.subcommands, self.context):
                 if part in src:
                     return src, part
-            if part == "all_args":
-                return all_args, ""
-            return (all_args, "") if part == "args" else (None, part)
+            return (self.all_matched_args, "") if part == "args" else (None, part)
         prefix = parts.pop(0)  # parts[0]
         if prefix in {"options", "subcommands"} and prefix in self.components:
             raise RuntimeError(lang.require("arparma", "ambiguous_name").format(target=prefix))

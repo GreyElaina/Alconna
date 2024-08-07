@@ -1,9 +1,12 @@
 """Alconna 参数相关"""
 from __future__ import annotations
 
+import re
+import inspect
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import (
     Any,
+    cast,
     Dict,
     Iterator,
     List,
@@ -14,14 +17,87 @@ from typing import (
     TypeVar,
     Union,
     final,
-    runtime_checkable,
+    runtime_checkable, Type, Callable,
 )
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypeAlias
 
 from nepattern import BasePattern, MatchMode, parser
 
 TPrefixes = Union[List[Union[str, object]], List[Tuple[object, str]]]
 DataUnit = TypeVar("DataUnit", covariant=True)
+
+class _ShortcutRegWrapper(Protocol):
+    def __call__(self, slot: int | str, content: str | None, context: dict[str, Any]) -> Any: ...
+
+
+class _OldShortcutRegWrapper(Protocol):
+    def __call__(self, slot: int | str, content: str | None) -> Any: ...
+
+
+ShortcutRegWrapper: TypeAlias = "_ShortcutRegWrapper | _OldShortcutRegWrapper"
+
+
+class ShortcutArgs(TypedDict):
+    """快捷指令参数"""
+
+    command: NotRequired[str]
+    """快捷指令的命令"""
+    args: NotRequired[list[Any]]
+    """快捷指令的附带参数"""
+    fuzzy: NotRequired[bool]
+    """是否允许命令后随参数"""
+    prefix: NotRequired[bool]
+    """是否调用时保留指令前缀"""
+    wrapper: NotRequired[ShortcutRegWrapper]
+    """快捷指令的正则匹配结果的额外处理函数"""
+    humanized: NotRequired[str]
+    """快捷指令的人类可读描述"""
+
+
+DEFAULT_WRAPPER = lambda slot, content, context: content
+
+
+class InnerShortcutArgs:
+    command: DataCollection[Any]
+    args: list[Any]
+    fuzzy: bool
+    prefix: bool
+    prefixes: list[str]
+    wrapper: _ShortcutRegWrapper
+    flags: int | re.RegexFlag
+
+    __slots__ = ("command", "args", "fuzzy", "prefix", "prefixes", "wrapper", "flags")
+
+    def __init__(
+        self,
+        command: DataCollection[Any],
+        args: list[Any] | None = None,
+        fuzzy: bool = True,
+        prefix: bool = False,
+        prefixes: list[str] | None = None,
+        wrapper: ShortcutRegWrapper | None = None,
+        flags: int | re.RegexFlag = 0,
+    ):
+        self.command = command
+        self.args = args or []
+        self.fuzzy = fuzzy
+        self.prefix = prefix
+        self.prefixes = prefixes or []
+        if not wrapper:
+            self.wrapper = DEFAULT_WRAPPER
+        else:
+            params = inspect.signature(wrapper).parameters
+            if len(params) > 3:
+                self.wrapper = cast(_ShortcutRegWrapper, wrapper)
+            elif len(params) < 3 or "self" in params:
+                wrapper = cast(_OldShortcutRegWrapper, wrapper)
+                self.wrapper = cast(_ShortcutRegWrapper, lambda slot, content, context: wrapper(slot, content))
+            else:
+                self.wrapper = cast(_ShortcutRegWrapper, wrapper)
+        self.flags = flags
+
+    def __repr__(self):
+        return f"ShortcutArgs({self.command!r}, args={self.args!r}, fuzzy={self.fuzzy}, prefix={self.prefix})"
 
 
 class ShortcutRegWrapper(Protocol):
@@ -122,6 +198,7 @@ class CommandMeta:
 
 TDC = TypeVar("TDC", bound=DataCollection[Any])
 T = TypeVar("T")
+TAValue: TypeAlias = Union[BasePattern[T, Any, Any], Type[T], T, Callable[..., T], Dict[Any, T], List[T]]
 
 
 @final
@@ -144,7 +221,7 @@ class KeyWordVar(BasePattern[T, Any, Literal[MatchMode.KEEP]]):
 
     base: BasePattern
 
-    def __init__(self, value: BasePattern[T, Any, Any] | type[T], sep: str = "="):
+    def __init__(self, value: TAValue[T], sep: str = "="):
         """构建一个具名参数
 
         Args:
@@ -163,7 +240,7 @@ class KeyWordVar(BasePattern[T, Any, Literal[MatchMode.KEEP]]):
 class _Kw:
     __slots__ = ()
 
-    def __getitem__(self, item: BasePattern[T, Any, Any] | type[T]):
+    def __getitem__(self, item: BasePattern[T, Any, Any] | type[T] | Any):
         return KeyWordVar(item)
 
     __matmul__ = __getitem__
@@ -177,7 +254,7 @@ class MultiVar(BasePattern[T, Any, Literal[MatchMode.KEEP]]):
     flag: Literal["+", "*"]
     length: int
 
-    def __init__(self, value: BasePattern[T, Any, Any] | type[T], flag: int | Literal["+", "*"] = "+"):
+    def __init__(self, value: TAValue[T], flag: int | Literal["+", "*"] = "+"):
         """构建一个可变参数
 
         Args:
@@ -241,3 +318,14 @@ class _Up:
 
 
 Up = _Up()
+
+
+class _StrMulti(MultiVar[str]):
+    pass
+
+
+StrMulti = _StrMulti(str)
+"""特殊参数, 用于匹配多个字符串, 并将结果通过 `str.join` 合并"""
+
+StrMulti.alias = "str+"
+StrMulti.refresh()

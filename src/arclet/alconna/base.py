@@ -65,8 +65,13 @@ class CommandNode:
     """命令节点帮助信息"""
 
     def __init__(
-        self, name: str, args: Arg | Args | None = None,
-        alias: Iterable[str] | None = None, dest: str | None = None, default: Any = Empty, action: Action | None = None,
+        self,
+        name: str,
+        args: Arg | Args | None = None,
+        alias: Iterable[str] | None = None,
+        dest: str | None = None,
+        default: Any = Empty,
+        action: Action | None = None,
         separators: str | Sequence[str] | set[str] | None = None,
         help_text: str | None = None,
     ):
@@ -83,24 +88,28 @@ class CommandNode:
             help_text (str | None, optional): 命令帮助信息
         """
         aliases = list(alias or [])
-        name = name.replace(" ", "_")
-        if "|" in name:
-            _aliases = name.split("|")
+        parts = name.split(" ")
+        _name = parts[-1]
+        if "|" in _name:
+            _aliases = _name.split("|")
             _aliases.sort(key=len, reverse=True)
-            name = _aliases[0]
+            _name = _aliases[0]
             aliases.extend(_aliases[1:])
-        if not name:
+        if not _name:
             raise InvalidArgs(lang.require("common", "name_empty"))
-        aliases.insert(0, name)
-        self.name = name
+        aliases.insert(0, _name)
+        self.name = _name
         self.aliases = frozenset(aliases)
+        self.requires = ([requires] if isinstance(requires, str) else list(requires)) if requires else []
+        self.requires.extend(parts[:-1])
         self.args = Args() + args
         self.default = default
         self.action = action or store
         _handle_default(self)
         self.separators = (" ",) if separators is None else ((separators,) if isinstance(separators, str) else tuple(separators))  # noqa: E501
         self.nargs = len(self.args.argument)
-        self.dest = (dest or self.name.lstrip('-')).lstrip('-')
+        self.dest = (dest or (("_".join(self.requires) + "_") if self.requires else "") + (self.name.lstrip("-") or self.name))  # noqa: E501
+        self.dest = self.dest.lstrip("-") or self.dest
         self.help_text = help_text or self.dest
         self._hash = self._calc_hash()
 
@@ -155,8 +164,12 @@ class Option(CommandNode):
 
     def __init__(
         self,
-        name: str, args: Arg | Args | None = None, alias: Iterable[str] | None = None,
-        dest: str | None = None, default: Any = Empty, action: Action | None = None,
+        name: str,
+        args: Arg | Args | None = None,
+        alias: Iterable[str] | None = None,
+        dest: str | None = None,
+        default: Any = Empty,
+        action: Action | None = None,
         separators: str | Sequence[str] | set[str] | None = None,
         help_text: str | None = None,
         compact: bool = False,
@@ -174,10 +187,12 @@ class Option(CommandNode):
             help_text (str | None, optional): 命令选项帮助信息
             compact (bool, optional): 是否允许名称与后随参数之间无分隔符
         """
+
+        self.priority = priority
         self.compact = compact
         if default is not Empty:
             default = default if isinstance(default, OptionResult) else OptionResult(default)
-        super().__init__(name, args, alias, dest, default, action, separators, help_text)
+        super().__init__(name, args, alias, dest, default, action, separators, help_text, requires)
         if self.separators == ("",):
             self.compact = True
             self.separators = (" ",)
@@ -274,7 +289,7 @@ class Subcommand(CommandNode):
         super().__init__(
             name,
             reduce(lambda x, y: x + y, [Args()] + [i for i in args if isinstance(i, (Arg, Args))]),  # type: ignore
-            alias, dest, default, None, separators, help_text,
+            alias, dest, default, None, separators, help_text, requires,
         )
 
     def __add__(self, other: Option | Args | Arg | str) -> Self:

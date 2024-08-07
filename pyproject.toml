@@ -10,8 +10,8 @@ authors = [
 ]
 dependencies = [
     "typing-extensions>=4.5.0",
-    "nepattern<1.0.0,>=0.7.0",
-    "tarina>=0.4.4",
+    "nepattern<1.0.0,>=0.7.6",
+    "tarina>=0.5.5",
 ]
 dynamic = ["version"]
 requires-python = ">=3.9"
@@ -135,7 +135,7 @@ skip_gitignore = true
 extra_standard_library = ["typing_extensions"]
 
 [tool.pyright]
-pythonVersion = "3.9"
+pythonVersion = "3.8"
 pythonPlatform = "All"
 typeCheckingMode = "basic"
 disableBytesTypePromotions = true

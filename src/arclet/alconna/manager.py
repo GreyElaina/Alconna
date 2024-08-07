@@ -8,10 +8,11 @@ import shelve
 import weakref
 from copy import copy
 from datetime import datetime
-from typing import TYPE_CHECKING, Match, MutableSet
-from weakref import WeakKeyDictionary, WeakValueDictionary
+from typing import TYPE_CHECKING, Any, Match, MutableSet, Union
+from weakref import WeakValueDictionary
 
-from tarina import lang
+from nepattern import TPattern
+from tarina import LRU, lang
 
 from .argv import Argv, __argv_type__
 from .arparma import Arparma
@@ -33,23 +34,26 @@ class CommandManager:
 
     sign: str
     current_count: int
-    max_count: int
+
+    @property
+    def max_count(self) -> int:
+        return config.command_max_count
 
     __commands: dict[str, WeakValueDictionary[str, Alconna]]
-    __analysers: WeakKeyDictionary[Alconna, Analyser]
-    __argv: WeakKeyDictionary[Alconna, Argv]
+    __analysers: dict[int, Analyser]
+    __argv: dict[int, Argv]
     __abandons: list[Alconna]
-    __shortcuts: dict[str, tuple[dict[str, InnerShortcutArgs], dict[str, InnerShortcutArgs]]]
+    __record: LRU[int, Arparma]
+    __shortcuts: dict[str, tuple[dict[str, Union[Arparma, InnerShortcutArgs]], dict[str, Union[Arparma, InnerShortcutArgs]]]]
 
     def __init__(self):
         self.cache_path = f"{__file__.replace('manager.py', '')}manager_cache.db"
         self.sign = "ALCONNA::"
-        self.max_count = config.command_max_count
         self.current_count = 0
 
         self.__commands = {}
-        self.__argv = WeakKeyDictionary()
-        self.__analysers = WeakKeyDictionary()
+        self.__argv = {}
+        self.__analysers = {}
         self.__abandons = []
         self.__shortcuts = {}
 
@@ -107,10 +111,11 @@ class CommandManager:
         """注册命令解析器, 会同时记录解析器对应的命令"""
         if self.current_count >= self.max_count:
             raise ExceedMaxCount
-        self.__argv.pop(command, None)
-        argv = self.__argv[command] = __argv_type__.get()(command.meta, command.namespace_config, command.separators)  # type: ignore
-        self.__analysers.pop(command, None)
-        self.__analysers[command] = command.compile(param_ids=argv.param_ids)
+        cmd_hash = command._hash
+        self.__argv.pop(cmd_hash, None)
+        argv = self.__argv[cmd_hash] = __argv_type__.get()(command.meta, command.namespace_config, command.separators)  # type: ignore
+        self.__analysers.pop(cmd_hash, None)
+        self.__analysers[cmd_hash] = command.compile(param_ids=argv.param_ids)
         namespace = self.__commands.setdefault(command.namespace, WeakValueDictionary())
         if _cmd := namespace.get(command.name):
             if _cmd == command:
@@ -122,37 +127,43 @@ class CommandManager:
             namespace[command.name] = command
             self.current_count += 1
 
+    def _resolve(self, cmd_hash: int) -> Alconna:
+        return self.__analysers[cmd_hash].command
+
     def resolve(self, command: Alconna[TDC]) -> Argv[TDC]:
         """获取命令解析器的参数解析器"""
+        cmd_hash = command._hash
         try:
-            return self.__argv[command]
+            return self.__argv[cmd_hash]
         except KeyError as e:
             namespace, name = self._command_part(command.path)
             raise ValueError(lang.require("manager", "undefined_command").format(target=f"{namespace}.{name}")) from e
 
     def require(self, command: Alconna[TDC]) -> Analyser[TDC]:
         """获取命令解析器"""
+        cmd_hash = command._hash
         try:
-            return self.__analysers[command]  # type: ignore
+            return self.__analysers[cmd_hash]  # type: ignore
         except KeyError as e:
             namespace, name = self._command_part(command.path)
             raise ValueError(lang.require("manager", "undefined_command").format(target=f"{namespace}.{name}")) from e
 
     def unpack(self, commands: MutableSet[Alconna]) -> "zip[tuple[Analyser, Argv]]":
         """获取多个命令解析器"""
+        hashs = {cmd._hash for cmd in commands}
         return zip(
-            [v for k, v in self.__analysers.items() if k in commands],
-            [v for k, v in self.__argv.items() if k in commands],
+            [v for k, v in self.__analysers.items() if k in hashs],
+            [v for k, v in self.__argv.items() if k in hashs],
         )
 
-    def delete(self, command: Alconna | str) -> None:
+    def delete(self, command: Alconna) -> None:
         """删除命令"""
-        namespace, name = self._command_part(command if isinstance(command, str) else command.path)
+        namespace, name = self._command_part(command.path)
+        cmd_hash = command._hash
         try:
-            base = self.__commands[namespace][name]
-            base.formatter.remove(base)
-            del self.__argv[base]
-            del self.__analysers[base]
+            command.formatter.remove(command)
+            del self.__argv[cmd_hash]
+            del self.__analysers[cmd_hash]
             del self.__commands[namespace][name]
             self.current_count -= 1
         except KeyError:
@@ -162,20 +173,27 @@ class CommandManager:
     @contextlib.contextmanager
     def update(self, command: Alconna):
         """同步命令更改"""
-        if command not in self.__argv:
+        cmd_hash = command._hash
+        if cmd_hash not in self.__argv:
             raise ValueError(lang.require("manager", "undefined_command").format(target=command.path))
+        namespace, name = self._command_part(command.path)
+        self.clear_result(command)
         command.formatter.remove(command)
-        argv = self.__argv.pop(command)
-        analyser = self.__analysers.pop(command)
+        argv = self.__argv.pop(cmd_hash)
+        analyser = self.__analysers.pop(cmd_hash)
+        del self.__commands[namespace][name]
         yield
-        command._hash = command._calc_hash()
+        name = f"{command.command or command.prefixes[0]}"  # type: ignore
+        command.path = f"{command.namespace}::{name}"
+        cmd_hash = command._hash = command._calc_hash()
         argv.namespace = command.namespace_config
         argv.separators = command.separators
         argv.__post_init__(command.meta)
         argv.param_ids.clear()
         analyser.compile(argv.param_ids)
-        self.__argv[command] = argv
-        self.__analysers[command] = analyser
+        self.__commands.setdefault(command.namespace, WeakValueDictionary())[name] = command
+        self.__argv[cmd_hash] = argv
+        self.__analysers[cmd_hash] = analyser
         command.formatter.add(command)
 
     def is_disable(self, command: Alconna) -> bool:
@@ -191,7 +209,7 @@ class CommandManager:
         if not enabled and command not in self.__abandons:
             self.__abandons.append(command)
 
-    def add_shortcut(self, target: Alconna, key: str, source: ShortcutArgs):
+    def add_shortcut(self, target: Alconna, key: str | TPattern, source: Arparma | ShortcutArgs):
         """添加快捷命令
 
         Args:
@@ -202,32 +220,48 @@ class CommandManager:
         namespace, name = self._command_part(target.path)
         argv = self.resolve(target)
         _shortcut = self.__shortcuts.setdefault(f"{namespace}.{name}", ({}, {}))
-        humanize = source.pop("humanized", None)
-        if source.get("prefix", False) and target.prefixes:
-            prefixes = []
-            out = []
-            for prefix in target.prefixes:
-                if not isinstance(prefix, str):
-                    continue
-                prefixes.append(prefix)
-                _shortcut[1][f"{re.escape(prefix)}{key}"] = InnerShortcutArgs(
-                    **{**source, "command": argv.converter(prefix + source.get("command", str(target.command)))}
+        if isinstance(key, str):
+            _key = key
+            _flags = 0
+        else:
+            _key = key.pattern
+            _flags = key.flags
+        if isinstance(source, dict):
+            humanize = source.pop("humanized", None)
+            if source.get("prefix", False) and target.prefixes:
+                prefixes = []
+                out = []
+                for prefix in target.prefixes:
+                    if not isinstance(prefix, str):
+                        continue
+                    prefixes.append(prefix)
+                    _shortcut[1][f"{re.escape(prefix)}{_key}"] = InnerShortcutArgs(
+                        **{**source, "command": argv.converter(prefix + source.get("command", str(target.command)))},
+                        flags=_flags,
+                    )
+                    out.append(
+                        lang.require("shortcut", "add_success").format(shortcut=f"{prefix}{_key}", target=target.path)
+                    )
+                _shortcut[0][humanize or _key] = InnerShortcutArgs(
+                    **{**source, "command": argv.converter(source.get("command", str(target.command))), "prefixes": prefixes},
+                    flags=_flags,
                 )
-                out.append(
-                    lang.require("shortcut", "add_success").format(shortcut=f"{prefix}{key}", target=target.path)
-                )
-            _shortcut[0][humanize or key] = InnerShortcutArgs(
-                **{**source, "command": argv.converter(source.get("command", str(target.command))), "prefixes": prefixes}
+                target.formatter.update_shortcut(target)
+                return "\n".join(out)
+            _shortcut[0][humanize or _key] = _shortcut[1][_key] = InnerShortcutArgs(
+                **{**source, "command": argv.converter(source.get("command", str(target.command)))},
+                flags=_flags,
             )
             target.formatter.update_shortcut(target)
-            return "\n".join(out)
-        _shortcut[0][humanize or key] = _shortcut[1][key] = InnerShortcutArgs(
-            **{**source, "command": argv.converter(source.get("command", str(target.command)))}
-        )
-        target.formatter.update_shortcut(target)
-        return lang.require("shortcut", "add_success").format(shortcut=key, target=target.path)
+            return lang.require("shortcut", "add_success").format(shortcut=_key, target=target.path)
+        elif source.matched:
+            _shortcut[0][_key] = _shortcut[1][_key] = source
+            target.formatter.update_shortcut(target)
+            return lang.require("shortcut", "add_success").format(shortcut=_key, target=target.path)
+        else:
+            raise ValueError(lang.require("manager", "incorrect_shortcut").format(target=f"{_key}"))
 
-    def get_shortcut(self, target: Alconna[TDC]) -> dict[str, InnerShortcutArgs]:
+    def get_shortcut(self, target: Alconna[TDC]) -> dict[str, Union[Arparma[TDC], InnerShortcutArgs]]:
         """列出快捷命令
 
         Args:
@@ -237,7 +271,8 @@ class CommandManager:
             dict[str, Arparma | InnerShortcutArgs]: 快捷命令的参数
         """
         namespace, name = self._command_part(target.path)
-        if target not in self.__analysers:
+        cmd_hash = target._hash
+        if cmd_hash not in self.__analysers:
             raise ValueError(lang.require("manager", "undefined_command").format(target=f"{namespace}.{name}"))
         shortcuts = self.__shortcuts.get(f"{namespace}.{name}", {})
         if not shortcuts:
@@ -246,7 +281,7 @@ class CommandManager:
 
     def find_shortcut(
         self, target: Alconna[TDC], data: list
-    ) -> tuple[list, InnerShortcutArgs, Match[str] | None]:
+    ) -> tuple[list, Arparma[TDC] | InnerShortcutArgs, Match[str] | None]:
         """查找快捷命令
 
         Args:
@@ -254,7 +289,7 @@ class CommandManager:
             data (list): 传入的命令数据
 
         Returns:
-            tuple[list, InnerShortcutArgs, re.Match[str]]: 返回匹配的快捷命令
+            tuple[list, Union[Arparma, InnerShortcutArgs], re.Match[str]]: 返回匹配的快捷命令
         """
         namespace, name = self._command_part(target.path)
         if not (_shortcut := self.__shortcuts.get(f"{namespace}.{name}")):
@@ -264,12 +299,13 @@ class CommandManager:
             if query in _shortcut[1]:
                 return data, _shortcut[1][query], None
             for key, args in _shortcut[1].items():
-                if args.fuzzy and (mat := re.match(f"^{key}", query)):
+                if isinstance(args, InnerShortcutArgs) and args.fuzzy and (mat := re.match(f"^{key}", query, args.flags)):
                     if len(query) > mat.span()[1]:
                         data.insert(0, query[mat.span()[1]:])
                     return data, args, mat
-                elif mat := re.fullmatch(key, query):
-                    return data, _shortcut[1][key], mat
+                elif mat := re.fullmatch(key, query, getattr(args, "flags", 0)):
+                    if not (isinstance(args, InnerShortcutArgs) and not args.fuzzy and data):
+                        return data, _shortcut[1][key], mat
             if not data:
                 break
             next_data = data.pop(0)
@@ -280,19 +316,20 @@ class CommandManager:
             lang.require("manager", "shortcut_parse_error").format(target=f"{namespace}.{name}", query=query)
         )
 
-    def delete_shortcut(self, target: Alconna, key: str | None = None):
+    def delete_shortcut(self, target: Alconna, key: str | TPattern | None = None):
         """删除快捷命令"""
         namespace, name = self._command_part(target.path)
         if not (_shortcut := self.__shortcuts.get(f"{namespace}.{name}")):
             raise ValueError(lang.require("manager", "undefined_command").format(target=f"{namespace}.{name}"))
         if key:
+            _key = key if isinstance(key, str) else key.pattern
             try:
-                _shortcut[0].pop(key, None)
-                del _shortcut[1][key]
-                return lang.require("shortcut", "delete_success").format(shortcut=key, target=target.path)
+                _shortcut[0].pop(_key, None)
+                del _shortcut[1][_key]
+                return lang.require("shortcut", "delete_success").format(shortcut=_key, target=target.path)
             except KeyError as e:
                 raise ValueError(
-                    lang.require("manager", "shortcut_parse_error").format(target=f"{namespace}.{name}", query=key)
+                    lang.require("manager", "shortcut_parse_error").format(target=f"{namespace}.{name}", query=_key)
                 ) from e
         else:
             self.__shortcuts.pop(f"{namespace}.{name}")
@@ -308,7 +345,7 @@ class CommandManager:
     def get_commands(self, namespace: str | Namespace = "") -> list[Alconna]:
         """获取命令列表"""
         if not namespace:
-            return list(self.__analysers.keys())
+            return [ana.command for ana in self.__analysers.values()]
         if isinstance(namespace, Namespace):
             namespace = Namespace.name
         if namespace not in self.__commands:
@@ -390,6 +427,58 @@ class CommandManager:
         if cmd := self.get_command(command):
             return cmd.get_help()
 
+    def record(self, token: int, result: Arparma):
+        """记录某个命令的 `token`"""
+        self.__record[token] = result
+
+    def get_record(self, token: int) -> Arparma | None:
+        """获取某个 `token` 对应的 `Arparma` 对象"""
+        if token in self.__record:
+            return self.__record[token]
+
+    def get_token(self, result: Arparma) -> int:
+        """获取某个命令的 `token`"""
+        return next((token for token, res in self.__record.items() if res == result), 0)
+
+    def get_result(self, command: Alconna) -> list[Arparma]:
+        """获取某个命令的所有 `Arparma` 对象"""
+        return [v for v in self.__record.values() if v._id == command._hash]
+
+    def clear_result(self, command: Alconna):
+        """清除某个命令下的所有解析缓存"""
+        tokens = list(self.__record.keys())
+        for token in tokens:
+            if self.__record[token]._id == command._hash:
+                del self.__record[token]
+        ana = self.require(command)
+        ana.used_tokens.clear()
+
+    @property
+    def recent_message(self) -> DataCollection[str | Any] | None:
+        """获取最近一次使用的命令"""
+        if rct := self.__record.peek_first_item():
+            return rct[1].origin  # type: ignore
+
+    @property
+    def last_using(self):
+        """获取最近一次使用的 `Alconna` 对象"""
+        if rct := self.__record.peek_first_item():
+            return rct[1].source  # type: ignore
+
+    @property
+    def records(self) -> LRU[int, Arparma]:
+        """获取当前记录"""
+        return self.__record
+
+    def reuse(self, index: int = -1):
+        """获取当前记录中的某个值"""
+        key = self.__record.keys()[index]
+        return self.__record[key]
+
+    def set_record_size(self, size: int):
+        """设置记录的最大长度"""
+        self.__record.set_size(size)
+
     def __repr__(self):
         return (
             f"Current: {hex(id(self))} in {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n"
@@ -397,6 +486,8 @@ class CommandManager:
             + f"[{', '.join([cmd.path for cmd in self.get_commands()])}]"
             + "\nShortcuts:\n"
             + "\n".join([f" {k} => {v}" for short in self.__shortcuts.values() for k, v in short[0].items()])
+            + "\nRecords:\n"
+            + "\n".join([f" [{k}]: {v[1].origin}" for k, v in enumerate(self.__record.items()[:20])])
             + "\nDisabled Commands:\n"
             + f"[{', '.join(map(lambda x: x.path, self.__abandons))}]"
         )

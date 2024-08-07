@@ -1,15 +1,40 @@
-import time
-from arclet.alconna import Alconna, Option, Args, command_manager
 import cProfile
 import pstats
+import time
 
-alc = Alconna(
-    "test",
-    Option("--foo", Args["f", str]),
-    Option("--bar", Args["b", str]),
-    Option("--baz", Args["z", str]),
-    Option("--qux", Args["q", str]),
-)
+from arclet.alconna import ANY, Alconna, Args, command_manager, namespace
+
+
+class Plain:
+    type = "Plain"
+    text: str
+
+    def __init__(self, t: str):
+        self.text = t
+
+    def __repr__(self):
+        return self.text
+
+
+class At:
+    type = "At"
+    target: int
+
+    def __init__(self, t: int):
+        self.target = t
+
+    def __repr__(self):
+        return f"At:{self.target}"
+
+
+with namespace("test") as np:
+    np.enable_message_cache = False
+    np.to_text = lambda x: x.text if x.__class__ is Plain else None
+    alc = Alconna(
+        ["."],
+        "test",
+        Args["bar", ANY]
+    )
 
 argv = command_manager.resolve(alc)
 analyser = command_manager.require(alc)

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypedDict
-from weakref import WeakKeyDictionary
 
 from nepattern import ANY, AnyString
 from tarina import Empty, lang
@@ -20,13 +19,38 @@ def resolve(parts: list[str], options: list[Option | Subcommand]):
         return None
     pf = parts.pop(0)
     for opt in options:
+        if not opt.requires:
+            # reqs.setdefault(opt.name, opt)
+            [reqs.setdefault(i, opt) for i in opt.aliases] if isinstance(opt, Option) else None
+            reqs.setdefault(opt.name, resolve_requires(opt.options)) if isinstance(opt, Subcommand) else None
+        else:
+            _reqs = _cache = {}
+            for req in opt.requires:
+                if not _reqs:
+                    _reqs[req] = {}
+                    _cache = _reqs[req]
+                else:
+                    _cache[req] = {}
+                    _cache = _cache[req]
+            # _cache[opt.name] = opt  # type: ignore
+            [_cache.setdefault(i, opt) for i in opt.aliases] if isinstance(opt, Option) else None  # type: ignore
+            _cache.setdefault(opt.name, resolve_requires(opt.options)) if isinstance(opt, Subcommand) else None
+            _u(reqs, _reqs)
+    return reqs
+
+
+def ensure_node(targets: list[str], options: list[Option | Subcommand]):
+    if not targets:
+        return None
+    pf = targets.pop(0)
+    for opt in options:
         if isinstance(opt, Option) and pf in opt.aliases:
             return opt
         if isinstance(opt, Subcommand) and pf == opt.name:
-            if not parts:
+            if not targets:
                 return opt
-            return sub if (sub := resolve(parts, opt.options)) else opt
-    return resolve(parts, options)
+            return sub if (sub := ensure_node(targets, opt.options)) else opt
+    return ensure_node(targets, options)
 
 
 class TraceHead(TypedDict):
@@ -57,7 +81,7 @@ class TextFormatter:
     """
 
     def __init__(self):
-        self.data: "WeakKeyDictionary[Alconna, Trace]" = WeakKeyDictionary()
+        self.data: "dict[int, Trace]" = {}
         self.ignore_names = set()
 
     def add(self, base: Alconna):
@@ -77,7 +101,13 @@ class TextFormatter:
             base.options.copy(),
             {} if base.meta.hide_shortcut else base._get_shortcuts(),
         )
-        self.data[base] = res
+        self.data[base._hash] = res
+        return self
+
+    def update_shortcut(self, base: Alconna):
+        """更新目标命令的快捷指令"""
+        if not base.meta.hide_shortcut:
+            self.data[base._hash].shortcuts = base._get_shortcuts()
         return self
 
     def update_shortcut(self, base: Alconna):
@@ -88,7 +118,7 @@ class TextFormatter:
 
     def remove(self, base: Alconna):
         """移除目标命令"""
-        self.data.pop(base)
+        self.data.pop(base._hash)
 
     def format_node(self, parts: list | None = None):
         """格式化命令节点
@@ -100,11 +130,36 @@ class TextFormatter:
         def _handle(trace: Trace):
             if not parts or parts == [""]:
                 return self.format(trace)
-            end = resolve(parts, trace.body)
-            if isinstance(end, Option):
-                return self.format(Trace({"name": "│".join(end.aliases), "description": end.help_text, 'example': None, 'usage': None}, end.args, end.separators, [], {}))  # noqa: E501
-            if isinstance(end, Subcommand):
-                return self.format(Trace({"name": "│".join(end.aliases), "description": end.help_text, 'example': None, 'usage': None}, end.args, end.separators, end.options, {}))  # noqa: E501
+            _cache = resolve_requires(trace.body)
+            _parts = []
+            for text in parts:
+                if isinstance(_cache, dict) and text in _cache:
+                    _cache = _cache[text]
+                    _parts.append(text)
+            if not _parts:
+                return self.format(trace)
+            if isinstance(_cache, dict):
+                if ensure := ensure_node(_parts, trace.body):
+                    _cache = ensure
+                else:
+                    _opts, _visited = [], set()
+                    for k, i in _cache.items():
+                        if isinstance(i, dict):
+                            _opts.append(Option(k, requires=_parts))
+                        elif i not in _visited:
+                            _opts.append(i)
+                            _visited.add(i)
+                    return self.format(
+                        Trace({"name": _parts[-1], 'description': _parts[-1], 'example': None, 'usage': None}, Args(), trace.separators, _opts, {})  # noqa: E501
+                    )
+            if isinstance(_cache, Option):
+                return self.format(
+                    Trace({"name": "│".join(_cache.aliases), "description": _cache.help_text, 'example': None, 'usage': None}, _cache.args, _cache.separators, [], {})  # noqa: E501
+                )
+            if isinstance(_cache, Subcommand):
+                return self.format(
+                    Trace({"name": "│".join(_cache.aliases), "description": _cache.help_text, 'example': None, 'usage': None}, _cache.args, _cache.separators, _cache.options, {})  # noqa: E501
+                )
             return self.format(trace)
 
         return "\n".join([_handle(v) for v in self.data.values()])
@@ -193,7 +248,7 @@ class TextFormatter:
 
     def sub(self, node: Subcommand) -> str:
         """对单个子命令的描述"""
-        alias_text = "│".join(node.aliases)
+        alias_text = " ".join(node.requires) + (" " if node.requires else "") + "│".join(node.aliases)
         opt_string = "".join(
             [self.opt(opt).replace("\n", "\n  ").replace("# ", "* ") for opt in node.options if isinstance(opt, Option)]
         )
@@ -231,10 +286,10 @@ class TextFormatter:
             if isinstance(short, InnerShortcutArgs):
                 _key = key + (" ...args" if short.fuzzy else "")
                 prefixes = f"[{'│'.join(short.prefixes)}]" if short.prefixes else ""
-                result.append(f"'{prefixes}{_key}' => {prefixes}{short.command} {' '.join(short.args)}")
+                result.append(f"'{prefixes}{_key}' => {prefixes}{short.command} {' '.join(map(str, short.args))}")
             else:
                 result.append(f"'{key}' => {short.origin!r}")
         return f"{lang.require('format', 'shortcuts')}:\n" + "\n".join(result)
 
 
-__all__ = ["TextFormatter", "Trace"]
+__all__ = ["TextFormatter", "Trace", "TraceHead"]

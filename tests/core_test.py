@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from nepattern import IP, URL
 
@@ -343,12 +345,23 @@ def test_simple_override():
 def test_wildcard():
     alc13 = Alconna("core13", Args["foo", AllParam])
     assert alc13.parse(["core13 abc def gh", 123, 5.0, "dsdf"]).foo == [
-        "abc",
-        "def",
-        "gh",
+        "abc def gh",
         123,
         5.0,
         "dsdf",
+    ]
+    assert alc13.parse(
+        """core13
+import foo
+
+def test():
+    print("Hello, World!")"""
+    ).foo == [
+        """\
+import foo
+
+def test():
+    print("Hello, World!")"""
     ]
 
 
@@ -503,10 +516,60 @@ Unknown
     alc16_7.shortcut("test 123", {"args": ["abc"]})
     assert alc16_7.parse("test 123").bar == "abc"
 
+    alc16_8 = Alconna("core16_8", Args["bar", str])
+    res11 = alc16_8.parse("core16_8 1234")
+    assert res11.bar == "1234"
+    alc16_8.parse("core16_8 --shortcut test _")
+    res12 = alc16_8.parse("test")
+    assert res12.bar == "1234"
+
     alc16_9 = Alconna("core16_9", Args["bar", str])
     alc16_9.shortcut("test(.+)?", command="core16_9 {0}")
     assert alc16_9.parse("test123").bar == "123"
     assert not alc16_9.parse("test").matched
+
+    alc16_10 = Alconna("core16_10", Args["bar", str]["baz", int])
+    alc16_10.shortcut("/qux", {"command": "core16_10"})
+
+    assert alc16_10.parse(['/qux "abc def.zip"', 123]).bar == "abc def.zip"
+
+    alc16_11 = Alconna("core16_11", Args["bar", str])
+    pat = re.compile("test", re.I)
+    alc16_11.shortcut(pat, {"command": "core16_11"})
+    assert alc16_11.parse("TeSt 123").bar == "123"
+
+    def wrapper1(slot, content, context):
+        if slot == 0:
+            data = {"A": 100}.get(content, 0)
+            if context.get("user"):
+                return int(f"{data}{context['user']}")
+            return data
+        return content
+
+    alc16_12 = Alconna("core16_12", Args["bar", int])
+    alc16_12.shortcut("(.+)test", fuzzy=False, wrapper=wrapper1, arguments=["{0}"])
+    assert alc16_12.parse("Atest").bar == 100
+    assert alc16_12.parse("Atest", {"user": "456"}).bar == 100456
+    assert alc16_12.parse("Btest").bar == 0
+    assert alc16_12.parse("Btest", {"user": "456"}).bar == 456
+
+    alc16_13 = Alconna("core16_13", Option("rank", Args["rank", str]))
+
+    def wrapper2(slot, content):
+        if slot == "rank" and not content:
+            return "--all"
+        return content
+
+    alc16_13.shortcut(
+        r"(?i:io)(?i:rank)\s*(?P<rank>[a-zA-Z+-]*)",
+        command="core16_13 rank {rank}",
+        fuzzy=False,
+        wrapper=wrapper2
+    )
+
+    assert alc16_13.parse("iorank x").matched
+    assert alc16_13.parse("iorankx").rank == "x"
+    assert alc16_13.parse("iorank").rank == "--all"
 
 
 def test_help():
@@ -750,12 +813,12 @@ def test_action():
     alc24 = Alconna("core24", Option("--yes|-y", action=store_true), Args["module", AllParam])
     res = alc24.parse("core24 -y abc def")
     assert res.query[bool]("yes.value") is True
-    assert res.module == ["abc", "def"]
+    assert res.module == ["abc def"]
 
     alc24_1 = Alconna("core24", Args["yes", {"--yes": True, "-y": True}, False]["module", AllParam])
     assert alc24_1.parse("core24 -y abc def").yes
     assert not alc24_1.parse("core24 abc def").yes
-    assert alc24_1.parse("core24 abc def").module == ["abc", "def"]
+    assert alc24_1.parse("core24 abc def").module == ["abc def"]
 
     alc24_2 = Alconna(
         "core24_2",

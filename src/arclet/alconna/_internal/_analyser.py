@@ -23,13 +23,14 @@ from ..exceptions import (
     SpecialOptionTriggered,
 )
 from ..manager import command_manager
-from ..model import HeadResult, OptionResult, SubcommandResult
+from ..model import HeadResult, OptionResult, Sentence, SubcommandResult
 from ..output import output_manager
 from ..typing import TDC, InnerShortcutArgs
 from ._handlers import (
     HEAD_HANDLES,
     _handle_shortcut_data,
     _handle_shortcut_reg,
+    handle_head_fuzzy,
     analyse_args,
     analyse_param,
     handle_completion,
@@ -59,10 +60,7 @@ def default_compiler(analyser: SubAnalyser, pids: set[str]):
         if isinstance(opts, Option) and not isinstance(opts, (Help, Shortcut, Completion)):
             if opts.compact or opts.action.type == 2 or not set(analyser.command.separators).issuperset(opts.separators):  # noqa: E501
                 analyser.compact_params.append(opts)
-            for alias in opts.aliases:
-                if alias in analyser.compile_params and isinstance(analyser.compile_params[alias], SubAnalyser):
-                    continue
-                analyser.compile_params[alias] = opts
+            _compile_opts(opts, analyser.compile_params)  # type: ignore
             if opts.default is not Empty:
                 analyser.default_opt_result[opts.dest] = (opts.default, opts.action)
             pids.update(opts.aliases)
@@ -168,16 +166,15 @@ class SubAnalyser(Generic[TDC]):
             FuzzyMatchSuccess: 模糊匹配成功
         """
         sub = argv.current_node = self.command
-        if not trigger:
-            name, _ = argv.next(sub.separators)
-            if name not in sub.aliases:
-                argv.rollback(name)
-                if not argv.fuzzy_match:
-                    raise InvalidParam(lang.require("subcommand", "name_error").format(source=sub.dest, target=name))
-                for al in sub.aliases:
-                    if levenshtein(name, al) >= argv.fuzzy_threshold:
-                        raise FuzzyMatchSuccess(lang.require("fuzzy", "matched").format(source=al, target=name))
+        name, _ = argv.next(sub.separators)
+        if name not in sub.aliases:
+            argv.rollback(name)
+            if not argv.fuzzy_match:
                 raise InvalidParam(lang.require("subcommand", "name_error").format(source=sub.dest, target=name))
+            for al in sub.aliases:
+                if levenshtein(name, al) >= argv.fuzzy_threshold:
+                    raise FuzzyMatchSuccess(lang.require("fuzzy", "matched").format(source=al, target=name))
+            raise InvalidParam(lang.require("subcommand", "name_error").format(source=sub.dest, target=name))
 
         self.value_result = sub.action.value
         return self.analyse(argv)
@@ -237,6 +234,14 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
         """
         super().__init__(alconna)
         self._compiler = compiler or default_compiler
+        self.used_tokens = set()
+
+    def compile(self, param_ids: set[str]):
+        self.extra_allow = not self.command.meta.strict or not self.command.namespace_config.strict
+        self.command_header = Header.generate(self.command.command, self.command.prefixes, self.command.meta.compact)
+        self.header_handler = HEAD_HANDLES[self.command_header.flag]
+        self._compiler(self, param_ids)
+        return self
 
     def compile(self, param_ids: set[str]):
         self.extra_allow = not self.command.meta.strict or not self.command.namespace_config.strict
@@ -249,14 +254,14 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
         return f"<{self.__class__.__name__} of {self.command.path}>"
 
     def shortcut(
-        self, argv: Argv[TDC], data: list[Any], short: InnerShortcutArgs, reg: Match | None = None
+        self, argv: Argv[TDC], data: list[Any], short: Arparma | InnerShortcutArgs, reg: Match | None = None
     ) -> Arparma[TDC]:
         """处理被触发的快捷命令
 
         Args:
             argv (Argv[TDC]): 命令行参数
             data (list[Any]): 剩余参数
-            short (InnerShortcutArgs): 快捷命令
+            short (Arparma | InnerShortcutArgs): 快捷命令
             reg (Match | None): 可能的正则匹配结果
 
         Returns:
@@ -265,6 +270,9 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
         Raises:
             ParamsUnmatched: 若不允许快捷命令后随其他参数，则抛出此异常
         """
+        if isinstance(short, Arparma):
+            return short
+
         argv.build(short.command)  # type: ignore
         if not short.fuzzy and data:
             exc = ParamsUnmatched(lang.require("analyser", "param_unmatched").format(target=data[0]))
@@ -278,7 +286,6 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
             if self.command.meta.raise_exception:
                 raise exc
             return self.export(argv, True, exc)
-        argv.bak_data = argv.raw_data.copy()
         argv.addon(data, merge_str=False)
         if reg:
             data = _handle_shortcut_reg(argv, reg.groups(), reg.groupdict(), short.wrapper)
@@ -286,7 +293,6 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
             argv.ndata = 0
             argv.current_index = 0
             argv.addon(data)
-        argv.bak_data = argv.raw_data.copy()
         return self.process(argv)
 
     def process(self, argv: Argv[TDC], trigger=None) -> Arparma[TDC]:
@@ -316,6 +322,9 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
             try:
                 rest, short, mat = command_manager.find_shortcut(self.command, [_next] + argv.release())
             except ValueError as exc:
+                if argv.fuzzy_match and (res := handle_head_fuzzy(self.command_header, _next, argv.fuzzy_threshold)):
+                    output_manager.send(self.command.name, lambda: res)
+                    return self.export(argv, True, FuzzyMatchSuccess(res))
                 if self.command.meta.raise_exception:
                     raise e from exc
                 return self.export(argv, True, e)
@@ -325,10 +334,6 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
                 argv.context[SHORTCUT_REGEX_MATCH] = mat
                 self.reset()
                 return self.shortcut(argv, rest, short, mat)
-
-        except FuzzyMatchSuccess as Fuzzy:
-            output_manager.send(self.command.name, lambda: str(Fuzzy))
-            return self.export(argv, True)
 
         except RuntimeError as e:
             exc = InvalidParam(lang.require("header", "error").format(target=argv.release(recover=True)[0]))
@@ -396,7 +401,7 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
             fail (bool, optional): 是否解析失败. Defaults to False.
             exception (Exception | None, optional): 解析失败时的异常. Defaults to None.
         """
-        result = Arparma(self.command.path, argv.origin, not fail, self.header_result, ctx=argv.exit())
+        result = Arparma(self.command._hash, argv.origin, not fail, self.header_result, ctx=argv.exit())
         if fail:
             result.error_info = exception
             result.error_data = argv.release()

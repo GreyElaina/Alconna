@@ -5,14 +5,15 @@ import inspect
 import re
 import sys
 from enum import Enum
-from typing import Any, Callable, Generic, Iterable, List, Sequence, Type, TypeVar, Union, cast
-from typing_extensions import Self, TypeAlias
+from functools import partial
+from typing import Any, Callable, Generic, Iterable, List, Sequence, TypeVar, Union, cast
+from typing_extensions import Self
 
 from nepattern import ANY, NONE, AntiPattern, BasePattern, MatchMode, RawStr, UnionPattern, parser
 from tarina import Empty, get_signature, lang
 
 from .exceptions import InvalidArgs
-from .typing import AllParam, KeyWordVar, KWBool, MultiKeyWordVar, MultiVar, UnpackVar
+from .typing import TAValue, AllParam, KeyWordVar, KWBool, MultiKeyWordVar, MultiVar, UnpackVar
 
 
 def safe_dcls_kw(**kwargs):
@@ -22,7 +23,6 @@ def safe_dcls_kw(**kwargs):
 
 
 _T = TypeVar("_T")
-TAValue: TypeAlias = Union[BasePattern[_T, Any, Any], Type[_T], str]
 
 
 class ArgFlag(str, Enum):
@@ -328,12 +328,10 @@ class Args(metaclass=ArgsMeta):
                 self.argument.keyword_only[arg.name] = arg
             else:
                 self.argument.normal.append(arg)
-                if arg.optional:
-                    if self.argument.vars_keyword or self.argument.vars_positional:
-                        raise InvalidArgs(lang.require("args", "exclude_mutable_args"))
-                    self.optional_count += 1
-                elif arg.field.default is not Empty:
-                    self.optional_count += 1
+            if arg.optional:
+                self.optional_count += 1
+            elif arg.field.default is not Empty:
+                self.optional_count += 1
         self.argument.clear()
         self.argument.extend(_tmp)
         del _tmp

@@ -24,6 +24,12 @@ class Argv(Generic[TDC]):
     separators: tuple[str, ...] = field(default=(" ",))
     """命令分隔符"""
 
+    preprocessors: dict[type, Callable[..., Any]] = field(default_factory=dict)
+    """命令元素的预处理器"""
+    filter_out: list[type] = field(default_factory=list)
+    """需要过滤掉的命令元素"""
+    checker: Callable[[Any], bool] | None = field(default=None)
+    """检查传入命令"""
     param_ids: set[str] = field(default_factory=set)
     """节点名集合"""
 
@@ -64,7 +70,10 @@ class Argv(Generic[TDC]):
         self.reset()
         self.compile(meta)
         if __cache := self.__class__._cache.get(self.__class__, {}):
+            self.preprocessors.update(__cache.get("preprocessors") or {})
+            self.filter_out.extend(__cache.get("filter_out") or [])
             self.to_text = __cache.get("to_text") or self.to_text
+            self.checker = __cache.get("checker") or self.checker
             self.converter = __cache.get("converter") or self.converter
 
     def compile(self, meta: CommandMeta):
@@ -72,6 +81,7 @@ class Argv(Generic[TDC]):
         self.fuzzy_threshold = meta.fuzzy_threshold
         self.to_text = self.namespace.to_text
         self.converter = self.namespace.converter or self.converter  # type: ignore
+        self.message_cache = self.namespace.enable_message_cache
         self.filter_crlf = not meta.keep_crlf
         self.context_style = meta.context_style
         self.special = {}
@@ -88,10 +98,15 @@ class Argv(Generic[TDC]):
         self.ndata = 0
         self.bak_data = []
         self.raw_data = []
+        self.token = 0
         self.origin = "None"  # type: ignore
         self._sep = None
-        self._next = None
         self.current_node = None
+
+    @staticmethod
+    def generate_token(data: list) -> int:
+        """命令的`token`的生成函数"""
+        return hash(repr(data))
 
     @property
     def done(self) -> bool:
@@ -108,6 +123,13 @@ class Argv(Generic[TDC]):
             Self: 自身
         """
         self.reset()
+        if self.checker and not self.checker(data):
+            if not self.converter:
+                raise TypeError(data)
+            try:
+                data = self.converter(data)  # type: ignore
+            except Exception as e:
+                raise TypeError(data) from e
         self.origin = data
         if data.__class__ is str:
             data = [data]  # type: ignore
@@ -138,7 +160,7 @@ class Argv(Generic[TDC]):
             Self: 自身
         """
         for i, d in enumerate(data):
-            if not d:
+            if d is None:
                 continue
             if res := self.to_text(d):
                 d = res
@@ -192,6 +214,8 @@ class Argv(Generic[TDC]):
             return
         if self._sep:
             _current_data = self.raw_data[self.current_index]
+            if self._sep[0] in data and data[0] not in ("'", '"'):
+                data = f"\'{data}\'"
             self.raw_data[self.current_index] = f"{data}{self._sep[0]}{_current_data}"
             return
         if self.current_index >= 1:
@@ -217,12 +241,13 @@ class Argv(Generic[TDC]):
             self.bak_data.pop(self.current_index)
             self.raw_data.pop(self.current_index)
 
-    def release(self, separate: tuple[str, ...] | None = None, recover: bool = False) -> list[str | Any]:
+    def release(self, separate: tuple[str, ...] | None = None, recover: bool = False, no_split: bool = False) -> list[str | Any]:
         """获取剩余的数据
 
         Args:
             separate (tuple[str, ...] | None, optional): 分隔符.
             recover (bool, optional): 是否从头开始获取.
+            no_split (bool, optional): 是否不分割.
 
         Returns:
             list[str | Any]: 剩余的数据.
@@ -230,7 +255,9 @@ class Argv(Generic[TDC]):
         _result = []
         data = self.bak_data if recover else self.raw_data[self.current_index:]
         for _data in data:
-            if _data.__class__ is str:
+            if _data.__class__ is str and not _data:
+                continue
+            if _data.__class__ is str and not no_split:
                 _result.extend(split(_data, separate or (" ",), self.filter_crlf))
             else:
                 _result.append(_data)
