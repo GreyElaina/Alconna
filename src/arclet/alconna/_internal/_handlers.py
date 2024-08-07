@@ -16,7 +16,7 @@ from ..exceptions import AlconnaException, ArgumentMissing, FuzzyMatchSuccess, I
 from ..model import HeadResult, OptionResult, Sentence
 from ..output import output_manager
 from ..typing import KWBool, MultiKeyWordVar, MultiVar, _ShortcutRegWrapper, _StrMulti
-from ._header import Double, Header, Pair
+from ._header import Header
 from ._util import escape, levenshtein, unescape
 
 if TYPE_CHECKING:
@@ -554,32 +554,10 @@ def _header_handle2(header: "Header[BasePattern, BasePattern]", argv: Argv):
     may_cmd, _m_str = argv.next()
     _after_analyse_header(header, argv, head_text, may_cmd, _str, _m_str)
 
-
-def _header_handle3(header: "Header[list[Pair], Any]", argv: Argv):
-    head_text, _str = argv.next()
-    may_cmd, _m_str = argv.next()
-    if _m_str:
-        for pair in header.content:
-            if res := pair.match(head_text, may_cmd, argv.rollback, header.compact):
-                return HeadResult(*res, fixes=header.mapping)
-    _after_analyse_header(header, argv, head_text, may_cmd, _str, _m_str)
-
-
-def _header_handle4(header: "Header[Double, Any]", argv: Argv):
-    head_text, _str = argv.next()
-    may_cmd, _m_str = argv.next()
-
-    if res := header.content.match(head_text, may_cmd, _str, _m_str, argv.rollback, header.compact):
-        return HeadResult(*res, fixes=header.mapping)
-    _after_analyse_header(header, argv, head_text, may_cmd, _str, _m_str)
-
-
 HEAD_HANDLES: dict[int, Callable[[Header, Argv], HeadResult]] = {
     0: _header_handle0,
     1: _header_handle1,
     2: _header_handle2,
-    3: _header_handle3,
-    4: _header_handle4,
 }
 
 
