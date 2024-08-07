@@ -581,7 +581,7 @@ def handle_shortcut(analyser: Analyser, argv: Argv):
             else:
                 msg = analyser.command.shortcut(opt_v["name"], fuzzy=True, command=opt_v["command"])
             output_manager.send(analyser.command.name, lambda: msg)
-    except Exception:
+    except Exception as e:
         output_manager.send(analyser.command.name, lambda: str(e))  # noqa
     return analyser.export(argv, True, SpecialOptionTriggered("shortcut"))
 
