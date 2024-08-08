@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import re
-import shelve
 import weakref
 from copy import copy
 from datetime import datetime
