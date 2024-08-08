@@ -32,7 +32,6 @@ class CommandManager:
     命令管理器负责记录命令, 存储命令, 命令行参数, 命令解析器, 快捷指令等
     """
 
-    sign: str
     current_count: int
 
     @property
@@ -46,8 +45,6 @@ class CommandManager:
     __shortcuts: dict[str, tuple[dict[str, InnerShortcutArgs], dict[str, InnerShortcutArgs]]]
 
     def __init__(self):
-        self.cache_path = f"{__file__.replace('manager.py', '')}manager_cache.db"
-        self.sign = "ALCONNA::"
         self.current_count = 0
 
         self.__commands = {}
@@ -65,24 +62,6 @@ class CommandManager:
             self.__shortcuts.clear()
 
         weakref.finalize(self, _del)
-
-    def load_cache(self) -> None:
-        """加载缓存"""
-        with contextlib.suppress(FileNotFoundError, KeyError):
-            with shelve.open(self.cache_path) as db:
-                self.__shortcuts = dict(db["shortcuts"])  # type: ignore
-
-    def dump_cache(self) -> None:
-        """保存缓存"""
-        data = {}
-        for key, short in self.__shortcuts.items():
-            if isinstance(short, dict):
-                data[key] = {k: v for k, v in short.items() if k != "wrapper"}
-            else:
-                data[key] = short
-        with shelve.open(self.cache_path) as db:
-            db["shortcuts"] = data
-        data.clear()
 
     @property
     def get_loaded_namespaces(self):
@@ -132,6 +111,7 @@ class CommandManager:
     def resolve(self, command: Alconna[TDC]) -> Argv[TDC]:
         """获取命令解析器的参数解析器"""
         cmd_hash = command._hash
+
         try:
             return self.__argv[cmd_hash]
         except KeyError as e:
@@ -141,6 +121,7 @@ class CommandManager:
     def require(self, command: Alconna[TDC]) -> Analyser[TDC]:
         """获取命令解析器"""
         cmd_hash = command._hash
+
         try:
             return self.__analysers[cmd_hash]  # type: ignore
         except KeyError as e:
@@ -159,6 +140,7 @@ class CommandManager:
         """删除命令"""
         namespace, name = self._command_part(command.path)
         cmd_hash = command._hash
+
         try:
             command.formatter.remove(command)
             del self.__argv[cmd_hash]
