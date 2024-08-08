@@ -4,11 +4,11 @@ from __future__ import annotations
 from dataclasses import replace
 from functools import reduce
 from typing import Any, Iterable, Sequence, overload
-from typing_extensions import Self
 
 from tarina import Empty, lang
+from typing_extensions import Self
 
-from .action import Action, store
+from .action import ACTION_STORE_ELLIPSIS, Action
 from .args import Arg, Args
 from .exceptions import InvalidArgs
 from .model import OptionResult, SubcommandResult
@@ -101,7 +101,7 @@ class CommandNode:
         self.aliases = frozenset(aliases)
         self.args = Args() + args
         self.default = default
-        self.action = action or store
+        self.action = action or ACTION_STORE_ELLIPSIS
         _handle_default(self)
         self.separators = (" ",) if separators is None else ((separators,) if isinstance(separators, str) else tuple(separators))  # noqa: E501
         self.nargs = len(self.args.argument)

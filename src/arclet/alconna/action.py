@@ -28,17 +28,17 @@ class Action:
     value: Any
 
 
-store = Action(ActType.STORE, Ellipsis)
+ACTION_STORE_ELLIPSIS = Action(ActType.STORE, Ellipsis)
 """默认的存储动作"""
-store_true = Action(ActType.STORE, True)
+ACTION_STORE_TRUE = Action(ActType.STORE, True)
 """存储 True"""
-store_false = Action(ActType.STORE, False)
+ACTION_STORE_FALSE = Action(ActType.STORE, False)
 """存储 False"""
 
-append = Action(ActType.APPEND, [Ellipsis])
+ACTION_APPEND_ELLIPSIS = Action(ActType.APPEND, [Ellipsis])
 """默认的追加动作"""
 
-count = Action(ActType.COUNT, 1)
+ACTION_COUNT_ONE = Action(ActType.COUNT, 1)
 """默认的计数动作"""
 
 

@@ -3,11 +3,11 @@
 from nepattern import ANY as ANY  # noqa
 from tarina import Empty as Empty  # noqa
 
-from .action import append as append
+from .action import ACTION_APPEND_ELLIPSIS as ACTION_APPEND_ELLIPSIS
 from .action import append_value as append_value
-from .action import count as count
-from .action import store_false as store_false
-from .action import store_true as store_true
+from .action import ACTION_COUNT_ONE as ACTION_COUNT_ONE
+from .action import ACTION_STORE_FALSE as ACTION_STORE_FALSE
+from .action import ACTION_STORE_TRUE as ACTION_STORE_TRUE
 from .action import store_value as store_value
 from .args import Arg as Arg
 from .args import ArgFlag as ArgFlag

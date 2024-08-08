@@ -22,7 +22,7 @@ from ..exceptions import (
 )
 from ..model import HeadResult, OptionResult
 from ..output import output_manager
-from ..typing import KWBool, MultiKeyWordVar, MultiVar, _ShortcutRegWrapper, _StrMulti
+from ..typing import KWBool, MultiKeyWordVar, MultiVar, ShortcutRegWrapper, _StrMulti
 from ._header import Header
 from ._util import escape, levenshtein, unescape
 
@@ -226,31 +226,38 @@ def analyse_args(argv: Argv, args: Args) -> dict[str, Any]:
         dict[str, Any]: 解析结果
     """
     result = {}
+
     for arg in args.argument.normal:
         argv.current_node = arg
-        may_arg, _str = argv.next(arg.separators)
-        if _str and may_arg in argv.special:
+        may_arg, is_str = argv.next(arg.separators)
+
+        if is_str and may_arg in argv.special:
             if argv.special[may_arg] not in argv.namespace.disable_builtin_options:
                 raise SpecialOptionTriggered(argv.special[may_arg])
-        if _str and may_arg in argv.param_ids and arg.optional:
+    
+        if is_str and may_arg in argv.param_ids and arg.optional:
             if (de := arg.field.default) is not Empty:
                 result[arg.name] = de
             argv.rollback(may_arg)
             continue
-        if may_arg is None or (_str and not may_arg):
+
+        if may_arg is None or (is_str and not may_arg):
             # argv.rollback(may_arg)
             if (de := arg.field.default) is not Empty:
                 result[arg.name] = de
             elif not arg.optional:
                 raise ArgumentMissing(arg.field.get_missing_tips(lang.require("args", "missing").format(key=arg.name)))
+
             continue
+    
         value = arg.value
         if value.alias == "*":
             argv.rollback(may_arg)
             result[arg.name] = argv.converter(argv.release(no_split=True))
             argv.current_index = argv.ndata
             return result
-        _validate(argv, arg, value, result, may_arg, _str)
+        _validate(argv, arg, value, result, may_arg, is_str)
+
     if args.argument.unpack:
         arg, unpack = args.argument.unpack
         try:
@@ -261,17 +268,21 @@ def analyse_args(argv: Argv, args: Args) -> dict[str, Any]:
                 result[arg.name] = de
             elif not arg.optional:
                 raise e
+
     for slot in args.argument.vars_positional:
         step_varpos(argv, args, slot, result)
+    
     if args.argument.keyword_only:
         step_keyword(argv, args, result)
+
     for slot in args.argument.vars_keyword:
         step_varkey(argv, slot, result)
+
     argv.current_node = None
     return result
 
 
-def handle_option(argv: Argv, opt: Option, trigger: str | None = None) -> tuple[str, OptionResult]:
+def handle_option(argv: Argv, opt: Option, trigger: str | None = None):
     """
     处理 `Option` 部分
 
@@ -299,30 +310,33 @@ def handle_option(argv: Argv, opt: Option, trigger: str | None = None) -> tuple[
                     break
         elif name in opt.aliases:
             error = False
+
         if error:
             argv.rollback(name)
-            if not argv.fuzzy_match:
-                raise InvalidParam(lang.require("option", "name_error").format(source=opt.dest, target=name))
-            for al in opt.aliases:
-                if levenshtein(name, al) >= argv.fuzzy_threshold:
-                    raise FuzzyMatchSuccess(lang.require("fuzzy", "matched").format(source=al, target=name))
-            raise InvalidParam(lang.require("option", "name_error").format(source=opt.dest, target=name))
-    return (
-        (opt.dest, OptionResult(None, analyse_args(argv, opt.args)))
-        if opt.nargs
-        else (opt.dest, OptionResult(_cnt or opt.action.value))
-    )
 
+            if argv.fuzzy_match:
+                for al in opt.aliases:
+                    if levenshtein(name, al) >= argv.fuzzy_threshold:
+                        raise FuzzyMatchSuccess(lang.require("fuzzy", "matched").format(source=al, target=name))
+
+            raise InvalidParam(lang.require("option", "name_error").format(source=opt.dest, target=name))
+
+    if opt.nargs:
+        return opt.dest, OptionResult(None, analyse_args(argv, opt.args))
+    
+    return opt.dest, OptionResult(_cnt or opt.action.value)
 
 def handle_action(param: Option, source: OptionResult, target: OptionResult):
     """处理 `Option` 的 `action`"""
     if param.action.type == 0:
         return target
+
     if param.action.type == 2:
         if not param.nargs:
             source.value += target.value
             return source
         return target
+
     if not param.nargs:
         source.value = source.value[:]
         source.value.extend(target.value)
@@ -445,15 +459,18 @@ def analyse_param(analyser: SubAnalyser, argv: Argv, seps: tuple[str, ...] | Non
                     analyser.subcommands_result[sparam.command.dest] = sparam.result()
             argv.current_node = None
             return True
+
     argv.rollback(_text)
     if analyser.compact_params and analyse_compact_params(analyser, argv):
         argv.current_node = None
         return True
+
     if analyser.command.nargs and not analyser.args_result:
         analyser.args_result = analyse_args(argv, analyser.self_args)
         if analyser.args_result:
             argv.current_node = None
             return True
+
     if analyser.extra_allow:
         analyser.args_result.setdefault("$extra", []).append(_text)
         argv.next(seps, move=True)
@@ -511,6 +528,7 @@ def _header_handle2(header: "Header[BasePattern, BasePattern]", argv: Argv):
         return HeadResult(val.value, val._value, True, fixes=header.mapping)
     may_cmd, _m_str = argv.next()
     _after_analyse_header(header, argv, head_text, may_cmd, _str, _m_str)
+
 
 HEAD_HANDLES: dict[int, Callable[[Header, Argv], HeadResult]] = {
     0: _header_handle0,
@@ -656,7 +674,7 @@ INDEX_REG_SLOT = re.compile(r"\{(\d+)\}")
 KEY_REG_SLOT = re.compile(r"\{(\w+)\}")
 
 
-def _handle_shortcut_reg(argv: Argv, groups: tuple[str, ...], gdict: dict[str, str], wrapper: _ShortcutRegWrapper):
+def _handle_shortcut_reg(argv: Argv, groups: tuple[str, ...], gdict: dict[str, str], wrapper: ShortcutRegWrapper):
     data = []
     for unit in argv.raw_data:
         if not isinstance(unit, str):

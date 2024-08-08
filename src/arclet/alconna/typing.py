@@ -27,16 +27,8 @@ from typing_extensions import NotRequired, TypeAlias
 TPrefixes = List[str]
 DataUnit = TypeVar("DataUnit", covariant=True)
 
-class _ShortcutRegWrapper(Protocol):
+class ShortcutRegWrapper(Protocol):
     def __call__(self, slot: int | str, content: str | None, context: dict[str, Any]) -> Any: ...
-
-
-class _OldShortcutRegWrapper(Protocol):
-    def __call__(self, slot: int | str, content: str | None) -> Any: ...
-
-
-ShortcutRegWrapper: TypeAlias = "_ShortcutRegWrapper | _OldShortcutRegWrapper"
-
 
 class ShortcutArgs(TypedDict):
     """快捷指令参数"""
@@ -55,7 +47,8 @@ class ShortcutArgs(TypedDict):
     """快捷指令的人类可读描述"""
 
 
-DEFAULT_WRAPPER = lambda slot, content, context: content
+def DEFAULT_WRAPPER(slot, content, context):
+    return content
 
 
 class InnerShortcutArgs:
@@ -64,7 +57,7 @@ class InnerShortcutArgs:
     fuzzy: bool
     prefix: bool
     prefixes: list[str]
-    wrapper: _ShortcutRegWrapper
+    wrapper: ShortcutRegWrapper
     flags: int | re.RegexFlag
 
     __slots__ = ("command", "args", "fuzzy", "prefix", "prefixes", "wrapper", "flags")
@@ -76,7 +69,7 @@ class InnerShortcutArgs:
         fuzzy: bool = True,
         prefix: bool = False,
         prefixes: list[str] | None = None,
-        wrapper: ShortcutRegWrapper | None = None,
+        wrapper: ShortcutRegWrapper = DEFAULT_WRAPPER,
         flags: int | re.RegexFlag = 0,
     ):
         self.command = command
@@ -84,17 +77,7 @@ class InnerShortcutArgs:
         self.fuzzy = fuzzy
         self.prefix = prefix
         self.prefixes = prefixes or []
-        if not wrapper:
-            self.wrapper = DEFAULT_WRAPPER
-        else:
-            params = inspect.signature(wrapper).parameters
-            if len(params) > 3:
-                self.wrapper = cast(_ShortcutRegWrapper, wrapper)
-            elif len(params) < 3 or "self" in params:
-                wrapper = cast(_OldShortcutRegWrapper, wrapper)
-                self.wrapper = cast(_ShortcutRegWrapper, lambda slot, content, context: wrapper(slot, content))
-            else:
-                self.wrapper = cast(_ShortcutRegWrapper, wrapper)
+        self.wrapper = wrapper
         self.flags = flags
 
     def __repr__(self):
