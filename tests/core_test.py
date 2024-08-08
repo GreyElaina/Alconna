@@ -1,5 +1,3 @@
-import re
-
 import pytest
 from arclet.alconna import (
     Alconna,
@@ -183,8 +181,6 @@ def test_alconna_chain_option():
 
 
 def test_alconna_multi_header():
-    from nepattern import NUMBER
-
     class A:
         pass
 

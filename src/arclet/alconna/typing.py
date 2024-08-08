@@ -1,7 +1,7 @@
 """Alconna 参数相关"""
+
 from __future__ import annotations
 
-import inspect
 import re
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import (
@@ -16,7 +16,6 @@ from typing import (
     TypedDict,
     TypeVar,
     Union,
-    cast,
     final,
     runtime_checkable,
 )
@@ -27,8 +26,12 @@ from typing_extensions import NotRequired, TypeAlias
 TPrefixes = List[str]
 DataUnit = TypeVar("DataUnit", covariant=True)
 
+
 class ShortcutRegWrapper(Protocol):
-    def __call__(self, slot: int | str, content: str | None, context: dict[str, Any]) -> Any: ...
+    def __call__(
+        self, slot: int | str, content: str | None, context: dict[str, Any]
+    ) -> Any: ...
+
 
 class ShortcutArgs(TypedDict):
     """快捷指令参数"""
@@ -51,34 +54,15 @@ def DEFAULT_WRAPPER(slot, content, context):
     return content
 
 
+@dataclass
 class InnerShortcutArgs:
     command: DataCollection[Any]
-    args: list[Any]
-    fuzzy: bool
-    prefix: bool
-    prefixes: list[str]
-    wrapper: ShortcutRegWrapper
-    flags: int | re.RegexFlag
-
-    __slots__ = ("command", "args", "fuzzy", "prefix", "prefixes", "wrapper", "flags")
-
-    def __init__(
-        self,
-        command: DataCollection[Any],
-        args: list[Any] | None = None,
-        fuzzy: bool = True,
-        prefix: bool = False,
-        prefixes: list[str] | None = None,
-        wrapper: ShortcutRegWrapper = DEFAULT_WRAPPER,
-        flags: int | re.RegexFlag = 0,
-    ):
-        self.command = command
-        self.args = args or []
-        self.fuzzy = fuzzy
-        self.prefix = prefix
-        self.prefixes = prefixes or []
-        self.wrapper = wrapper
-        self.flags = flags
+    args: List[Any] = field(default_factory=list)
+    fuzzy: bool = True
+    prefix: bool = False
+    prefixes: List[str] = field(default_factory=list)
+    wrapper: ShortcutRegWrapper = DEFAULT_WRAPPER
+    flags: Union[int, re.RegexFlag] = 0
 
     def __repr__(self):
         return f"ShortcutArgs({self.command!r}, args={self.args!r}, fuzzy={self.fuzzy}, prefix={self.prefix})"
@@ -87,6 +71,7 @@ class InnerShortcutArgs:
 @runtime_checkable
 class DataCollection(Protocol[DataUnit]):
     """数据集合协议"""
+
     def __repr__(self) -> str: ...
     def __iter__(self) -> Iterator[DataUnit]: ...
     def __len__(self) -> int: ...
@@ -128,7 +113,9 @@ class CommandMeta:
 
 TDC = TypeVar("TDC", bound=DataCollection[Any])
 T = TypeVar("T")
-TAValue: TypeAlias = Union[BasePattern[T, Any, Any], Type[T], T, Callable[..., T], Dict[Any, T], List[T]]
+TAValue: TypeAlias = Union[
+    BasePattern[T, Any, Any], Type[T], T, Callable[..., T], Dict[Any, T], List[T]
+]
 
 
 @final
@@ -161,7 +148,9 @@ class KeyWordVar(BasePattern[T, Any, Literal[MatchMode.KEEP]]):
         self.base = value if isinstance(value, BasePattern) else parser(value)  # type: ignore
         self.sep = sep
         assert isinstance(self.base, BasePattern)
-        super().__init__(mode=MatchMode.KEEP, origin=self.base.origin, alias=f"@{sep}{self.base}")
+        super().__init__(
+            mode=MatchMode.KEEP, origin=self.base.origin, alias=f"@{sep}{self.base}"
+        )
 
     def __repr__(self):
         return self.alias
