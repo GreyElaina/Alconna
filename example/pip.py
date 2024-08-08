@@ -1,9 +1,16 @@
 from pathlib import Path
 from typing import Tuple
 
+from arclet.alconna import (
+    ACTION_COUNT_ONE,
+    ACTION_STORE_TRUE,
+    Alconna,
+    Args,
+    MultiVar,
+    Option,
+    Subcommand,
+)
 from nepattern import URL
-
-from arclet.alconna import Alconna, Args, MultiVar, Option, Subcommand, count, store_true
 
 pip = Alconna(
     "/pip",
@@ -12,8 +19,8 @@ pip = Alconna(
         Args["requirements", MultiVar(str, "*")],
         Option("-r|--requirement", Args["rfile", Path]),
         Option("-c|--constraint", Args["cfile", Path]),
-        Option("--no-deps", default=False, action=store_true),
-        Option("--pre", default=False, action=store_true),
+        Option("--no-deps", default=False, action=ACTION_STORE_TRUE),
+        Option("--pre", default=False, action=ACTION_STORE_TRUE),
         Option("-e|--editable", Args["path_or_url", [URL, Path]]),
         Option("--dry-run"),
         Option("-t|--target", Args["dir", Path]),
@@ -21,9 +28,9 @@ pip = Alconna(
         Option("--python-version", Args["python_version", str]),
         Option("--implementation", Args["impl", ["pp", "jy", "cp", "ip", "py"]]),
         Option("--abi", Args["abi", str]),
-        Option("-U|--upgrade", default=False, action=store_true),
-        Option("--force-reinstall", default=False, action=store_true),
-        Option("-i|--index-url", Args["url", URL])
+        Option("-U|--upgrade", default=False, action=ACTION_STORE_TRUE),
+        Option("--force-reinstall", default=False, action=ACTION_STORE_TRUE),
+        Option("-i|--index-url", Args["url", URL]),
         # and more ....
     ),
     Subcommand("download"),
@@ -41,15 +48,15 @@ pip = Alconna(
     Subcommand("completion"),
     Subcommand("debug"),
     Subcommand("help"),
-    Option("--debug", default=False, action=store_true),
-    Option("--isolated", default=False, action=store_true),
-    Option("--require-virtualenv", default=False, action=store_true),
+    Option("--debug", default=False, action=ACTION_STORE_TRUE),
+    Option("--isolated", default=False, action=ACTION_STORE_TRUE),
+    Option("--require-virtualenv", default=False, action=ACTION_STORE_TRUE),
     Option("--python", Args["python", str]),
-    Option("-v|--verbose", action=count, default=0),
+    Option("-v|--verbose", action=ACTION_COUNT_ONE, default=0),
     Option("-V|--version"),
-    Option("-q|--quiet", default=False, action=store_true),
+    Option("-q|--quiet", default=False, action=ACTION_STORE_TRUE),
     Option("--log", Args["log_path", Path]),
-    Option("--no-input", default=False, action=store_true),
+    Option("--no-input", default=False, action=ACTION_STORE_TRUE),
     Option("--proxy", Args["proxy", str]),
     Option("--retries", Args["count", int]),
     Option("--timeout", Args["sec", float]),
@@ -58,10 +65,10 @@ pip = Alconna(
     Option("--cert", Args["cert_path", Path]),
     Option("--client-cert", Args["client_path", Path]),
     Option("--cache-dir", Args["dir", Path]),
-    Option("--no-cache-dir", default=False, action=store_true),
-    Option("--disable-pip-version-check", default=False, action=store_true),
-    Option("no-color", default=False, action=store_true),
-    Option("no-python-version-warning", default=False, action=store_true),
+    Option("--no-cache-dir", default=False, action=ACTION_STORE_TRUE),
+    Option("--disable-pip-version-check", default=False, action=ACTION_STORE_TRUE),
+    Option("no-color", default=False, action=ACTION_STORE_TRUE),
+    Option("no-python-version-warning", default=False, action=ACTION_STORE_TRUE),
     Option("--use-feature", Args["feature", MultiVar(str)]),
     Option("--use-deprecated", Args["feature", MultiVar(str)]),
 )
