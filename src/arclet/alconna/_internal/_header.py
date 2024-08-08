@@ -11,6 +11,10 @@ from ..typing import TPrefixes
 from ._util import escape, unescape
 
 
+TContent = TypeVar("TContent", TPattern, "set[str]", BasePattern)
+TCompact = TypeVar("TCompact", TPattern, BasePattern, None)
+
+
 def _prefixed(pat: BasePattern):
     if pat.mode not in (MatchMode.REGEX_MATCH, MatchMode.REGEX_CONVERT):
         return pat
@@ -57,9 +61,6 @@ def _convert_bracket(name: str, mapping: dict):
             else:
                 parts[i] = f"(?P<{res[0]}>{res[1]})"
     return unescape("".join(parts)), True
-
-TContent = TypeVar("TContent", TPattern, "set[str]", BasePattern)
-TCompact = TypeVar("TCompact", TPattern, BasePattern, None)
 
 class Header(Generic[TContent, TCompact]):
     """命令头部的匹配表达式"""
