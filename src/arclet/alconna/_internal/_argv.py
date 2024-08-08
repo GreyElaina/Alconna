@@ -19,14 +19,12 @@ class Argv(Generic[TDC]):
     """命令行参数"""
 
     meta: InitVar[CommandMeta]
-    namespace: Namespace = field(default=config.default_namespace)
+    namespace: Namespace = field(default_factory=lambda: config.default_namespace)
     """命名空间"""
     separators: tuple[str, ...] = field(default=(" ",))
     """命令分隔符"""
-
     param_ids: set[str] = field(default_factory=set)
     """节点名集合"""
-
     fuzzy_match: bool = field(init=False)
     """当前命令是否模糊匹配"""
     fuzzy_threshold: float = field(init=False)
@@ -164,12 +162,15 @@ class Argv(Generic[TDC]):
         """
         if self._sep:
             self._sep = None
+
         if self.current_index == self.ndata:
             return "", True
+
         separate = separate or self.separators
         _current_data = self.raw_data[self.current_index]
         if _current_data.__class__ is str:
             _text, _rest_text = split_once(_current_data, separate, self.filter_crlf)  # type: ignore
+    
             if move:
                 if _rest_text:
                     self._sep = separate
@@ -190,14 +191,17 @@ class Argv(Generic[TDC]):
         """
         if data == "" or data is None:
             return
+
         if self._sep:
             _current_data = self.raw_data[self.current_index]
             if self._sep[0] in data and data[0] not in ("'", '"'):
                 data = f"\'{data}\'"
             self.raw_data[self.current_index] = f"{data}{self._sep[0]}{_current_data}"
             return
+ 
         if self.current_index >= 1:
             self.current_index -= 1
+    
         if replace:
             self.raw_data[self.current_index] = data
 
