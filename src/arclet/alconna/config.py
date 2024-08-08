@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, ContextManager, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict
+from contextlib import contextmanager
 
 
 from .i18n import lang as lang
@@ -24,8 +25,9 @@ class OptionNames(TypedDict):
 class Namespace:
     """命名空间配置, 用于规定同一命名空间下的选项的默认配置"""
 
-    name: str
+    name: str = field(hash=True)
     """命名空间名称"""
+
     prefixes: TPrefixes = field(default_factory=list)
     """默认前缀配置"""
     separators: tuple[str, ...] = field(default_factory=lambda: (" ",))
@@ -37,6 +39,7 @@ class Namespace:
     raise_exception: bool = field(default=False)
     """默认是否抛出异常"""
     disable_builtin_options: set[Literal["help", "shortcut", "completion"]] = field(default_factory=set)
+
     builtin_option_name: OptionNames = field(
         default_factory=lambda: {
             "help": {"--help", "-h"},
@@ -45,10 +48,12 @@ class Namespace:
         }
     )
     """默认的内置选项名称"""
+
     to_text: Callable[[Any], str | None] = field(default=lambda x: x if x.__class__ is str else None)
     """默认的选项转文本函数"""
     converter: Callable[[str | list], DataCollection[Any]] | None = field(default=lambda x: x)
     """默认的文本转选项函数"""
+
     compact: bool = field(default=False)
     """默认是否开启紧凑模式"""
     strict: bool = field(default=True)
@@ -59,9 +64,6 @@ class Namespace:
     def __eq__(self, other):
         return isinstance(other, Namespace) and other.name == self.name
 
-    def __hash__(self):
-        return hash(self.name)
-
     @property
     def headers(self):
         """默认前缀配置"""
@@ -71,8 +73,8 @@ class Namespace:
     def headers(self, value):
         self.prefixes = value
 
-
-class namespace(ContextManager[Namespace]):
+@contextmanager
+def namespace(name: Namespace | str):
     """新建一个命名空间配置并暂时作为默认命名空间
 
     Example:
@@ -81,35 +83,27 @@ class namespace(ContextManager[Namespace]):
         ...     alc = Alconna(...)
         ... assert alc.prefixes == ["aaa"]
     """
+    if isinstance(name, Namespace):
+        np = name
+        ns_name = name.name
+        if name.name not in config.namespaces:
+            config.namespaces[name.name] = name
+    elif name in config.namespaces:
+        np = config.namespaces[name]
+        ns_name = name
+    else:
+        np = Namespace(name)
+        ns_name = name
+        config.namespaces[name] = np
 
-    def __init__(self, name: Namespace | str):
-        """传入新建的命名空间的名称, 或者是一个存在的命名空间配置"""
-        if isinstance(name, Namespace):
-            self.np = name
-            self.name = name.name
-            if name.name not in config.namespaces:
-                config.namespaces[name.name] = name
-        elif name in config.namespaces:
-            self.np = config.namespaces[name]
-            self.name = name
-        else:
-            self.np = Namespace(name)
-            self.name = name
-            config.namespaces[name] = self.np
-        self.old = config.default_namespace
-        config.default_namespace = self.np
+    old = config.default_namespace
+    config.default_namespace = np
 
-    def __enter__(self) -> Namespace:
-        return self.np
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        config.default_namespace = self.old
-        config.namespaces[self.name] = self.np
-        del self.old
-        del self.np
-        if exc_type or exc_val or exc_tb:
-            return False
-
+    try:
+        yield np
+    finally:
+        config.default_namespace = old
+        config.namespaces[ns_name] = np
 
 class _AlconnaConfig:
     """全局配置类"""
