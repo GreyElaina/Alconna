@@ -20,29 +20,28 @@ from .manager import ShortcutArgs, command_manager
 from .typing import (
     TDC,
     CommandMeta,
-    DataCollection,
     ShortcutRegWrapper,
     TPrefixes,
 )
 
-T = TypeVar("T")
 TCallable = TypeVar("TCallable", bound=Callable[..., Any])
-TDC1 = TypeVar("TDC1", bound=DataCollection[Any])
 
 
 def handle_argv():
-    path = Path(sys.argv[0])
-    if str(path) == ".":
-        path = path.absolute()
+    path = Path(sys.argv[0]).absolute()
+
     head = path.stem
     if head == "__main__":
+        # "python -m" case
         head = path.parent.stem
+
     return head
 
 
 def add_builtin_options(options: list[Option | Subcommand], ns: Namespace) -> None:
     if "help" not in ns.disable_builtin_options:
         options.append(Help("|".join(ns.builtin_option_name["help"]), help_text=lang.require("builtin", "option_help")))  # noqa: E501
+    
     if "shortcut" not in ns.disable_builtin_options:
         options.append(
             Shortcut(
@@ -51,6 +50,7 @@ def add_builtin_options(options: list[Option | Subcommand], ns: Namespace) -> No
                 help_text=lang.require("builtin", "option_shortcut"),
             )
         )
+    
     if "completion" not in ns.disable_builtin_options:
         options.append(Completion("|".join(ns.builtin_option_name["completion"]), help_text=lang.require("builtin", "option_completion")))  # noqa: E501
 
