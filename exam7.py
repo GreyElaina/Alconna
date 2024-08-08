@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from pprint import pprint
 from dataclasses import dataclass, field
+from pprint import pprint
 from typing import Any, Iterable, Literal, Optional, Sequence, overload
-from typing_extensions import Self
 
 from arclet.alconna import Args
-from arclet.alconna.action import Action, store, store_true
+from arclet.alconna.action import ACTION_STORE_ELLIPSIS, ACTION_STORE_TRUE, Action
+from typing_extensions import Self
 
 
 @dataclass
@@ -38,11 +38,11 @@ class Node:
         aliases: Iterable[str] | None = None,
         args: Args | None = None,
         default: Any = None,
-        action: Action = store,
+        action: Action = ACTION_STORE_ELLIPSIS,
         separators: str | Sequence[str] | set[str] | None = None,
         help_text: str = "unknown",
         dest: str | None = None,
-        scope: str | None = None
+        scope: str | None = None,
     ):
         self.name = name.replace(" ", "_")
         self.aliases = frozenset(aliases or [])
@@ -163,7 +163,7 @@ node = Node("root")
 node.assign("foo")
 node.assign("foo", ":args", args=Args["foo", int]["bar", str])
 foo = node.select("foo")
-foo.assign(":action", action=store_true)
+foo.assign(":action", action=ACTION_STORE_TRUE)
 bar = foo.assign("bar", help_text="bar").select("bar")
 c = node.assign("a.b.c", upper_make=True)
 print(node)

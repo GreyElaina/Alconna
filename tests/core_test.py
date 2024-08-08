@@ -1,8 +1,6 @@
 import re
 
 import pytest
-from nepattern import IP, URL
-
 from arclet.alconna import (
     Alconna,
     AllParam,
@@ -17,6 +15,7 @@ from arclet.alconna import (
     Subcommand,
     namespace,
 )
+from nepattern import IP, URL
 
 
 def test_alconna_create():
@@ -425,7 +424,7 @@ def test_shortcut():
     assert alc16_5.parse("*core16_5 False").matched
     assert alc16_5.parse("+test").foo is True
 
-    def wrapper(slot, content):
+    def wrapper(slot, content, context):
         if content == "help":
             return "--help"
         return content
@@ -479,7 +478,7 @@ Unknown
 
     alc16_13 = Alconna("core16_13", Option("rank", Args["rank", str]))
 
-    def wrapper2(slot, content):
+    def wrapper2(slot, content, context):
         if slot == "rank" and not content:
             return "--all"
         return content
@@ -732,9 +731,16 @@ def test_nest_subcommand():
 def test_action():
     from typing import List
 
-    from arclet.alconna import append, append_value, count, store_true
+    from arclet.alconna import (
+        ACTION_APPEND_ELLIPSIS,
+        ACTION_COUNT_ONE,
+        ACTION_STORE_TRUE,
+        append_value,
+    )
 
-    alc24 = Alconna("core24", Option("--yes|-y", action=store_true), Args["module", AllParam])
+    alc24 = Alconna(
+        "core24", Option("--yes|-y", action=ACTION_STORE_TRUE), Args["module", AllParam]
+    )
     res = alc24.parse("core24 -y abc def")
     assert res.query[bool]("yes.value") is True
     assert res.module == ["abc def"]
@@ -748,10 +754,12 @@ def test_action():
         "core24_2",
         Option("--i", Args["foo", int]),
         Option("--a|-A", action=append_value(1)),
-        Option("--flag|-F", Args["flag", str], action=append, compact=True),
-        Option("-v", action=count),
-        Option("-x|--xyz", action=count),
-        Option("--q", action=count),
+        Option(
+            "--flag|-F", Args["flag", str], action=ACTION_APPEND_ELLIPSIS, compact=True
+        ),
+        Option("-v", action=ACTION_COUNT_ONE),
+        Option("-x|--xyz", action=ACTION_COUNT_ONE),
+        Option("--q", action=ACTION_COUNT_ONE),
     )
     res = alc24_2.parse(
         "core24_2 -A --a -vvv -x -x --xyzxyz " "-Fabc -Fdef --flag xyz --i 4 --i 5 " "--q --qq"
@@ -768,7 +776,12 @@ def test_action():
 
 
 def test_default():
-    from arclet.alconna import OptionResult, append, store_true, store_value
+    from arclet.alconna import (
+        ACTION_APPEND_ELLIPSIS,
+        ACTION_STORE_TRUE,
+        OptionResult,
+        store_value,
+    )
 
     alc25 = Alconna(
         "core25",
@@ -796,8 +809,8 @@ def test_default():
 
     alc25_1 = Alconna(
         "core25_1",
-        Option("--foo", action=append, default=423),
-        Subcommand("test", Option("--bar", default=False, action=store_true)),
+        Option("--foo", action=ACTION_APPEND_ELLIPSIS, default=423),
+        Subcommand("test", Option("--bar", default=False, action=ACTION_STORE_TRUE)),
     )
 
     res5 = alc25_1.parse("core25_1")

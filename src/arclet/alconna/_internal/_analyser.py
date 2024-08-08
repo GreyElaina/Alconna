@@ -65,21 +65,27 @@ def default_compiler(analyser: SubAnalyser, pids: set[str]):
         if isinstance(opts, Option) and not isinstance(opts, (Help, Shortcut, Completion)):
             if opts.compact or opts.action.type == 2 or not set(analyser.command.separators).issuperset(opts.separators):  # noqa: E501
                 analyser.compact_params.append(opts)
+
             for alias in opts.aliases:
                 if alias in analyser.compile_params and isinstance(analyser.compile_params[alias], SubAnalyser):
                     continue
                 analyser.compile_params[alias] = opts
+
             if opts.default is not Empty:
                 analyser.default_opt_result[opts.dest] = (opts.default, opts.action)
+
             pids.update(opts.aliases)
         elif isinstance(opts, Subcommand):
             sub = SubAnalyser(opts)
             for alias in opts.aliases:
                 analyser.compile_params[alias] = sub
+
             pids.update(opts.aliases)
             default_compiler(sub, pids)
+
             if not set(analyser.command.separators).issuperset(opts.separators):
                 analyser.compact_params.append(sub)
+    
             if sub.command.default is not Empty:
                 analyser.default_sub_result[opts.dest] = sub.command.default
 
@@ -176,10 +182,12 @@ class SubAnalyser(Generic[TDC]):
         sub = argv.current_node = self.command
         if not trigger:
             name, _ = argv.next(sub.separators)
+
             if name not in sub.aliases:
                 argv.rollback(name)
                 if not argv.fuzzy_match:
                     raise InvalidParam(lang.require("subcommand", "name_error").format(source=sub.dest, target=name))
+    
                 for al in sub.aliases:
                     if levenshtein(name, al) >= argv.fuzzy_threshold:
                         raise FuzzyMatchSuccess(lang.require("fuzzy", "matched").format(source=al, target=name))
