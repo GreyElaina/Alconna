@@ -33,8 +33,6 @@ from ..output import output_manager
 from ..typing import TDC, InnerShortcutArgs
 from ._handlers import (
     HEAD_HANDLES,
-    _handle_shortcut_data,
-    _handle_shortcut_reg,
     analyse_args,
     analyse_param,
     handle_completion,
@@ -42,6 +40,8 @@ from ._handlers import (
     handle_help,
     handle_opt_default,
     handle_shortcut,
+    handle_shortcut_data,
+    handle_shortcut_reg,
     prompt,
 )
 from ._header import Header
@@ -212,8 +212,14 @@ class SubAnalyser(Generic[TDC]):
             pass
         if self.default_main_only and not self.args_result:
             self.args_result = analyse_args(argv, self.self_args)
+
         if not self.args_result and self.need_main_args:
-            raise ArgumentMissing(lang.require("subcommand", "args_missing").format(name=self.command.dest))
+            raise ArgumentMissing(
+                lang.require("subcommand", "args_missing").format(
+                    name=self.command.dest
+                )
+            )
+
         return self
 
     def get_sub_analyser(self, target: Subcommand) -> SubAnalyser[TDC] | None:
@@ -227,6 +233,7 @@ class SubAnalyser(Generic[TDC]):
         """
         if target == self.command:
             return self
+
         for param in self.compile_params.values():
             if isinstance(param, SubAnalyser):
                 return param.get_sub_analyser(target)
@@ -286,7 +293,7 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
                 raise exc
             return self.export(argv, True, exc)
         argv.addon(short.args, merge_str=False)
-        data = _handle_shortcut_data(argv, data)
+        data = handle_shortcut_data(argv, data)
         if not data and argv.raw_data and any(isinstance(i, str) and bool(re.search(r"\{%(\d+)|\*(.*?)\}", i)) for i in argv.raw_data):
             exc = ArgumentMissing(lang.require("analyser", "param_missing"))
             if self.command.meta.raise_exception:
@@ -294,7 +301,9 @@ class Analyser(SubAnalyser[TDC], Generic[TDC]):
             return self.export(argv, True, exc)
         argv.addon(data, merge_str=False)
         if reg:
-            data = _handle_shortcut_reg(argv, reg.groups(), reg.groupdict(), short.wrapper)
+            data = handle_shortcut_reg(
+                argv, reg.groups(), reg.groupdict(), short.wrapper
+            )
             argv.raw_data.clear()
             argv.ndata = 0
             argv.current_index = 0

@@ -633,7 +633,7 @@ def _handle_multi_slot(argv: Argv, unit: str, data: list, index: int, current: i
     return offset
 
 
-def _handle_shortcut_data(argv: Argv, data: list):
+def handle_shortcut_data(argv: Argv, data: list):
     data_len = len(data)
     record = set()
     offset = 0
@@ -674,7 +674,12 @@ INDEX_REG_SLOT = re.compile(r"\{(\d+)\}")
 KEY_REG_SLOT = re.compile(r"\{(\w+)\}")
 
 
-def _handle_shortcut_reg(argv: Argv, groups: tuple[str, ...], gdict: dict[str, str], wrapper: ShortcutRegWrapper):
+def handle_shortcut_reg(
+    argv: Argv,
+    groups: tuple[str, ...],
+    gdict: dict[str, str],
+    wrapper: ShortcutRegWrapper,
+):
     data = []
     for unit in argv.raw_data:
         if not isinstance(unit, str):

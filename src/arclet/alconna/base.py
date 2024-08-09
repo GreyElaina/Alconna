@@ -17,29 +17,37 @@ from .model import OptionResult, SubcommandResult
 def _handle_default(node: CommandNode):
     if node.default is Empty:
         return
+
     act = node.action
     if act.type == 1 and not isinstance(act.value, list):
         act = node.action = replace(act, value=[act.value])
     elif act.type == 2 and not isinstance(act.value, int):
         act = node.action = replace(act, value=1)
+    
     if isinstance(node.default, (OptionResult, SubcommandResult)):
         if act.type == 0 and act.value is ...:
             node.action = Action(act.type, node.default.value)
+
         if act.type == 1:
             if not isinstance(node.default.value, list):
                 node.default.value = [node.default.value]
+
             if act.value[0] is ...:  # type: ignore
                 node.action = Action(act.type, node.default.value[:])
+
         if act.type == 2 and not isinstance(node.default.value, int):
             node.default.value = 1
     else:
         if act.type == 0 and act.value is ...:
             node.action = Action(act.type, node.default)
+    
         if act.type == 1:
             if not isinstance(node.default, list):
                 node.default = [node.default]
+
             if act.value[0] is ...:  # type: ignore
                 node.action = Action(act.type, node.default[:])
+
         if act.type == 2 and not isinstance(node.default, int):
             node.default = 1
 
